@@ -24,10 +24,17 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="pt-BR"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <footer className="py-6 mt-auto bg-gray-900 border-t border-gray-800 text-center">
+          <p className="text-xs text-gray-500 font-medium px-4">
+            Desenvolvido por: Pedro Henrique Borges Silva, Alexia Alves, Thiago Leal, David Soares e Valéria Lima.
+          </p>
+        </footer>
+      </body>
     </html>
   );
 }
