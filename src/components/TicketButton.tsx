@@ -7,11 +7,12 @@ import { formatTimeRemaining } from '@/lib/utils'
 import { Utensils, Clock, AlertCircle, Loader2 } from 'lucide-react'
 
 interface TicketButtonProps {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onTicketIssued: (ticket: any) => void
 }
 
 export function TicketButton({ onTicketIssued }: TicketButtonProps) {
-  const { hours, minutes, seconds, totalSeconds, isOpen, isClosed } = useCountdown()
+  const { totalSeconds, isOpen, isClosed } = useCountdown()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   

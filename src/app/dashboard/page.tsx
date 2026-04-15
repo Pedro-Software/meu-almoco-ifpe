@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation'
 
 export default function Dashboard() {
   const [userName, setUserName] = useState<string>('')
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ticket, setTicket] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const { queueInfo, loading: queueLoading } = useRealtimeQueue()

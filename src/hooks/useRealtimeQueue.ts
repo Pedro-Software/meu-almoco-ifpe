@@ -38,6 +38,7 @@ export function useRealtimeQueue() {
   }, [supabase])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchQueueInfo()
 
     // Subscribe para mudanças na tabela queue_state

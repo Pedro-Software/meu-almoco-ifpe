@@ -104,7 +104,7 @@ export default function AdminPage() {
     }
   }
 
-  function handleError(err: any) {
+  function handleError(err: unknown) {
     // Ignorar erros comuns de leitura falha por frame
   }
 
