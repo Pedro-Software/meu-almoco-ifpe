@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   full_name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin')),
+  is_super_admin BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -27,7 +28,7 @@ CREATE POLICY "Inserção de perfil via trigger"
   WITH CHECK (auth.uid() = id);
 
 -- A política "Admins podem ver todos os perfis" foi removida pois causava recursão infinita.
--- Se admins precisarem listar perfis no futuro, criaremos uma função RPC com SECURITY DEFINER.
+-- A política "Super admins podem ver perfis" também causa recursão — usamos RPCs com SECURITY DEFINER.
 
 -- 2. Tabela de Tickets (Fichas)
 CREATE TABLE IF NOT EXISTS public.tickets (
@@ -654,8 +655,7 @@ BEGIN
 END;
 $$;
 
--- 4j. Promover usuário a admin (EXECUTAR MANUALMENTE NO SUPABASE)
--- USE: SELECT public.promote_to_admin('email@ifpe.edu.br');
+-- 4j. Promover usuário a admin (LEGACY - usar manage_admin em vez disso)
 CREATE OR REPLACE FUNCTION public.promote_to_admin(p_email TEXT)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -680,6 +680,140 @@ BEGIN
     'success', true,
     'message', format('Usuário %s promovido a administrador', p_email)
   );
+END;
+$$;
+
+-- 4l. Listar admins (apenas super admin pode chamar)
+CREATE OR REPLACE FUNCTION public.list_admins()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_is_super BOOLEAN;
+  v_admins jsonb;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin' AND is_super_admin = true
+  ) INTO v_is_super;
+
+  IF NOT v_is_super THEN
+    RETURN jsonb_build_object('error', 'Apenas super admins podem listar administradores');
+  END IF;
+
+  SELECT COALESCE(jsonb_agg(
+    jsonb_build_object(
+      'id', p.id,
+      'email', u.email,
+      'full_name', p.full_name,
+      'is_super_admin', p.is_super_admin,
+      'created_at', p.created_at
+    ) ORDER BY p.is_super_admin DESC, p.full_name ASC
+  ), '[]'::jsonb) INTO v_admins
+  FROM public.profiles p
+  JOIN auth.users u ON u.id = p.id
+  WHERE p.role = 'admin';
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'admins', v_admins
+  );
+END;
+$$;
+
+-- 4m. Gerenciar admins - adicionar/remover (apenas super admin)
+CREATE OR REPLACE FUNCTION public.manage_admin(p_email TEXT, p_action TEXT)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_is_super BOOLEAN;
+  v_target_user_id UUID;
+  v_target_profile RECORD;
+  v_total_admins INTEGER;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin' AND is_super_admin = true
+  ) INTO v_is_super;
+
+  IF NOT v_is_super THEN
+    RETURN jsonb_build_object('error', 'Apenas super admins podem gerenciar administradores');
+  END IF;
+
+  IF p_action NOT IN ('add', 'remove') THEN
+    RETURN jsonb_build_object('error', 'Ação inválida. Use "add" ou "remove"');
+  END IF;
+
+  IF NOT (p_email LIKE '%@discente.ifpe.edu.br' OR p_email LIKE '%@ifpe.edu.br') THEN
+    RETURN jsonb_build_object('error', 'Apenas emails institucionais IFPE são aceitos (@discente.ifpe.edu.br ou @ifpe.edu.br)');
+  END IF;
+
+  SELECT id INTO v_target_user_id
+  FROM auth.users
+  WHERE email = p_email;
+
+  IF v_target_user_id IS NULL THEN
+    RETURN jsonb_build_object('error', 'Usuário não encontrado. O email precisa estar cadastrado no sistema.');
+  END IF;
+
+  IF v_target_user_id = auth.uid() THEN
+    RETURN jsonb_build_object('error', 'Você não pode alterar seu próprio papel');
+  END IF;
+
+  SELECT * INTO v_target_profile
+  FROM public.profiles
+  WHERE id = v_target_user_id;
+
+  IF v_target_profile IS NULL THEN
+    RETURN jsonb_build_object('error', 'Perfil do usuário não encontrado');
+  END IF;
+
+  IF p_action = 'add' THEN
+    IF v_target_profile.role = 'admin' THEN
+      RETURN jsonb_build_object('error', format('%s já é administrador', p_email));
+    END IF;
+
+    SELECT COUNT(*) INTO v_total_admins
+    FROM public.profiles
+    WHERE role = 'admin';
+
+    IF v_total_admins >= 50 THEN
+      RETURN jsonb_build_object('error', 'Limite máximo de 50 administradores atingido');
+    END IF;
+
+    UPDATE public.profiles
+    SET role = 'admin'
+    WHERE id = v_target_user_id;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'message', format('%s foi promovido a administrador', p_email)
+    );
+  END IF;
+
+  IF p_action = 'remove' THEN
+    IF v_target_profile.role != 'admin' THEN
+      RETURN jsonb_build_object('error', format('%s não é administrador', p_email));
+    END IF;
+
+    IF v_target_profile.is_super_admin THEN
+      RETURN jsonb_build_object('error', 'Não é possível remover um super administrador');
+    END IF;
+
+    UPDATE public.profiles
+    SET role = 'student'
+    WHERE id = v_target_user_id;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'message', format('%s foi removido dos administradores', p_email)
+    );
+  END IF;
+
+  RETURN jsonb_build_object('error', 'Ação não processada');
 END;
 $$;
 

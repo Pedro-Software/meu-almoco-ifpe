@@ -8,7 +8,8 @@ import { ValidationFeedback, FeedbackType } from '@/components/ValidationFeedbac
 import { 
   LogOut, Users, QrCode, BarChart3, UserX, Clock, 
   CheckCircle2, AlertTriangle, ArrowRight, DoorOpen,
-  ScanLine, SkipForward, ChevronDown, ChevronUp
+  ScanLine, SkipForward, ChevronDown, ChevronUp,
+  Shield, UserPlus, Trash2, Mail, Crown, Loader2
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
@@ -32,14 +33,28 @@ interface AdminStats {
   skipped_count: number
 }
 
+interface AdminUser {
+  id: string
+  email: string
+  full_name: string
+  is_super_admin: boolean
+  created_at: string
+}
+
 export default function AdminPage() {
   const [feedback, setFeedback] = useState<FeedbackState>({ type: null, title: '', message: '' })
   const [isAdmin, setIsAdmin] = useState(false)
-  const [activeTab, setActiveTab] = useState<'scanner' | 'queue' | 'stats'>('scanner')
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+  const [activeTab, setActiveTab] = useState<'scanner' | 'queue' | 'stats' | 'admins'>('scanner')
   const [waitingTickets, setWaitingTickets] = useState<WaitingTicket[]>([])
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null)
   const [loadingAction, setLoadingAction] = useState<string | null>(null)
   const [showScanner, setShowScanner] = useState(true)
+  const [adminList, setAdminList] = useState<AdminUser[]>([])
+  const [newAdminEmail, setNewAdminEmail] = useState('')
+  const [adminActionLoading, setAdminActionLoading] = useState(false)
+  const [adminError, setAdminError] = useState('')
+  const [adminSuccess, setAdminSuccess] = useState('')
   const isScanning = useRef(false)
   const { queueInfo, loading: queueLoading } = useRealtimeQueue()
   const supabase = createClient()
@@ -53,19 +68,33 @@ export default function AdminPage() {
         return
       }
 
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single()
+      // Usar RPC para verificar admin (bypassa RLS, evita recursão)
+      const { data: checkData, error: checkError } = await supabase.rpc('check_admin_role')
 
-      console.log('Admin check profile:', profile, 'error:', error, 'user.id:', user.id)
+      if (checkError) {
+        // Fallback: RPC pode não existir ainda, tentar query direta
+        console.log('RPC check_admin_role falhou, usando fallback:', checkError.message)
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single()
 
-      if (profile?.role !== 'admin') {
-        router.push('/dashboard')
-        return
+        if (profile?.role !== 'admin') {
+          router.push('/dashboard')
+          return
+        }
+        setIsAdmin(true)
+        setIsSuperAdmin(false)
+      } else {
+        console.log('Admin check via RPC:', checkData)
+        if (!checkData?.is_admin) {
+          router.push('/dashboard')
+          return
+        }
+        setIsAdmin(true)
+        setIsSuperAdmin(checkData?.is_super_admin === true)
       }
-      setIsAdmin(true)
     }
     checkAdmin()
   }, [supabase, router])
@@ -84,10 +113,73 @@ export default function AdminPage() {
     }
   }, [supabase])
 
+  const fetchAdminList = useCallback(async () => {
+    const { data, error } = await supabase.rpc('list_admins')
+    if (!error && data?.success) {
+      setAdminList(data.admins || [])
+    }
+  }, [supabase])
+
+  const handleAddAdmin = async () => {
+    setAdminError('')
+    setAdminSuccess('')
+    const email = newAdminEmail.trim().toLowerCase()
+
+    if (!email) {
+      setAdminError('Digite um email')
+      return
+    }
+
+    if (!email.endsWith('@discente.ifpe.edu.br') && !email.endsWith('@ifpe.edu.br')) {
+      setAdminError('Apenas emails institucionais IFPE são aceitos')
+      return
+    }
+
+    setAdminActionLoading(true)
+    try {
+      const { data, error } = await supabase.rpc('manage_admin', { p_email: email, p_action: 'add' })
+      if (error) {
+        setAdminError(error.message)
+      } else if (data?.error) {
+        setAdminError(data.error)
+      } else if (data?.success) {
+        setAdminSuccess(data.message)
+        setNewAdminEmail('')
+        fetchAdminList()
+      }
+    } catch {
+      setAdminError('Erro de conexão')
+    } finally {
+      setAdminActionLoading(false)
+    }
+  }
+
+  const handleRemoveAdmin = async (email: string) => {
+    setAdminError('')
+    setAdminSuccess('')
+    setAdminActionLoading(true)
+    try {
+      const { data, error } = await supabase.rpc('manage_admin', { p_email: email, p_action: 'remove' })
+      if (error) {
+        setAdminError(error.message)
+      } else if (data?.error) {
+        setAdminError(data.error)
+      } else if (data?.success) {
+        setAdminSuccess(data.message)
+        fetchAdminList()
+      }
+    } catch {
+      setAdminError('Erro de conexão')
+    } finally {
+      setAdminActionLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!isAdmin) return
     fetchWaitingTickets()
     fetchAdminStats()
+    if (isSuperAdmin) fetchAdminList()
 
     const interval = setInterval(() => {
       fetchWaitingTickets()
@@ -95,7 +187,7 @@ export default function AdminPage() {
     }, 10000)
 
     return () => clearInterval(interval)
-  }, [isAdmin, fetchWaitingTickets, fetchAdminStats])
+  }, [isAdmin, isSuperAdmin, fetchWaitingTickets, fetchAdminStats, fetchAdminList])
 
   // Atualizar ao receber evento realtime
   useEffect(() => {
@@ -344,6 +436,19 @@ export default function AdminPage() {
             <BarChart3 className="w-4 h-4" />
             <span className="hidden sm:inline">Relatório</span><span className="sm:hidden">Stats</span>
           </button>
+          {isSuperAdmin && (
+            <button
+              onClick={() => { setActiveTab('admins'); fetchAdminList(); }}
+              className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all ${
+                activeTab === 'admins' 
+                  ? 'bg-amber-600 text-white shadow-lg' 
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <Shield className="w-4 h-4" />
+              Admins
+            </button>
+          )}
         </div>
 
         {/* Tab Content */}
@@ -514,6 +619,118 @@ export default function AdminPage() {
                     Porcentagem: {queueInfo?.totalToday ? ((adminStats?.skipped_count || 0) / queueInfo.totalToday * 100).toFixed(1) : '0'}%
                   </p>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'admins' && isSuperAdmin && (
+          <div className="space-y-4 animate-fade-in">
+            {/* Add Admin Form */}
+            <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+              <div className="p-4 border-b border-gray-700">
+                <h3 className="text-white font-bold flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-amber-400" />
+                  Adicionar Administrador
+                </h3>
+                <p className="text-gray-400 text-sm mt-1">
+                  Apenas emails institucionais IFPE ({adminList.length}/50 admins)
+                </p>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                    <input
+                      type="email"
+                      value={newAdminEmail}
+                      onChange={(e) => { setNewAdminEmail(e.target.value); setAdminError(''); setAdminSuccess(''); }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddAdmin()}
+                      placeholder="email@discente.ifpe.edu.br"
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg pl-10 pr-4 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-colors"
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddAdmin}
+                    disabled={adminActionLoading}
+                    className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:bg-amber-600/50 text-white px-4 py-2.5 rounded-lg text-sm font-bold transition-all disabled:cursor-not-allowed"
+                  >
+                    {adminActionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                    <span className="hidden sm:inline">Adicionar</span>
+                  </button>
+                </div>
+
+                {adminError && (
+                  <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg px-3 py-2 text-sm animate-slide-up">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                    {adminError}
+                  </div>
+                )}
+                {adminSuccess && (
+                  <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 text-green-400 rounded-lg px-3 py-2 text-sm animate-slide-up">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                    {adminSuccess}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Admin List */}
+            <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+              <div className="p-4 border-b border-gray-700">
+                <h3 className="text-white font-bold flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-amber-400" />
+                  Administradores Cadastrados
+                  <span className="ml-auto text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-full">
+                    {adminList.length}/50
+                  </span>
+                </h3>
+              </div>
+              <div className="divide-y divide-gray-700 max-h-[60vh] overflow-y-auto">
+                {adminList.length > 0 ? (
+                  adminList.map((admin) => (
+                    <div key={admin.id} className="flex items-center justify-between gap-2 p-3 sm:p-4 hover:bg-gray-700/30 transition-colors">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`p-2 rounded-full flex-shrink-0 ${
+                          admin.is_super_admin 
+                            ? 'bg-amber-500/20' 
+                            : 'bg-blue-500/20'
+                        }`}>
+                          {admin.is_super_admin 
+                            ? <Crown className="w-4 h-4 text-amber-400" />
+                            : <Users className="w-4 h-4 text-blue-400" />
+                          }
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white font-medium text-sm truncate">{admin.full_name}</span>
+                            {admin.is_super_admin && (
+                              <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold flex-shrink-0">
+                                SUPER
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-gray-400 text-xs truncate block">{admin.email}</span>
+                        </div>
+                      </div>
+                      {!admin.is_super_admin && (
+                        <button
+                          onClick={() => handleRemoveAdmin(admin.email)}
+                          disabled={adminActionLoading}
+                          className="flex items-center gap-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-600/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 flex-shrink-0"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Remover</span>
+                        </button>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-12 text-center text-gray-500">
+                    <Shield className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">Nenhum administrador cadastrado</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
