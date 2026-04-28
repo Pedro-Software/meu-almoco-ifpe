@@ -98,10 +98,11 @@ BEGIN
     RETURN jsonb_build_object('error', 'Perfil não encontrado');
   END IF;
 
+  PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
+
   SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_queue_number
   FROM public.tickets
-  WHERE created_at::date = CURRENT_DATE
-  FOR UPDATE;
+  WHERE created_at::date = CURRENT_DATE;
 
   v_ticket_id := gen_random_uuid();
   v_qr_token := encode(

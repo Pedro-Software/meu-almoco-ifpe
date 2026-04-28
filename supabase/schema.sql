@@ -26,15 +26,8 @@ CREATE POLICY "Inserção de perfil via trigger"
   ON public.profiles FOR INSERT
   WITH CHECK (auth.uid() = id);
 
--- Admins podem ver todos os perfis
-CREATE POLICY "Admins podem ver todos os perfis"
-  ON public.profiles FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles
-      WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
+-- A política "Admins podem ver todos os perfis" foi removida pois causava recursão infinita.
+-- Se admins precisarem listar perfis no futuro, criaremos uma função RPC com SECURITY DEFINER.
 
 -- 2. Tabela de Tickets (Fichas)
 CREATE TABLE IF NOT EXISTS public.tickets (
@@ -199,11 +192,13 @@ BEGIN
     RETURN jsonb_build_object('error', 'Perfil não encontrado');
   END IF;
 
-  -- Gerar número sequencial (atômico com lock)
+  -- Bloquear o estado da fila para evitar condições de corrida (em vez de bloquear a agregação)
+  PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
+
+  -- Gerar número sequencial
   SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_queue_number
   FROM public.tickets
-  WHERE created_at::date = CURRENT_DATE
-  FOR UPDATE;
+  WHERE created_at::date = CURRENT_DATE;
 
   -- Gerar token QR único
   v_ticket_id := gen_random_uuid();

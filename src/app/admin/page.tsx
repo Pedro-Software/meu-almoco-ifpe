@@ -53,11 +53,13 @@ export default function AdminPage() {
         return
       }
 
-      const { data: profile } = await supabase
+      const { data: profile, error } = await supabase
         .from('profiles')
         .select('role')
         .eq('id', user.id)
         .single()
+
+      console.log('Admin check profile:', profile, 'error:', error, 'user.id:', user.id)
 
       if (profile?.role !== 'admin') {
         router.push('/dashboard')
@@ -116,21 +118,29 @@ export default function AdminPage() {
     }
   }, [isAdmin, supabase, fetchWaitingTickets, fetchAdminStats])
 
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
+
   useEffect(() => {
     if (!isAdmin || !showScanner || activeTab !== 'scanner') return
 
-    const scanner = new Html5QrcodeScanner(
-      "reader",
-      { fps: 10, qrbox: { width: 250, height: 250 } },
-      /* verbose= */ false
-    )
+    // Evitar inicialização dupla no React StrictMode
+    if (!scannerRef.current) {
+      scannerRef.current = new Html5QrcodeScanner(
+        "reader",
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        /* verbose= */ false
+      )
 
-    scanner.render(handleScan, handleError)
+      scannerRef.current.render(handleScan, handleError)
+    }
 
     return () => {
-      scanner.clear().catch(error => {
-        console.error("Failed to clear scanner", error)
-      })
+      if (scannerRef.current) {
+        scannerRef.current.clear().catch(error => {
+          console.error("Failed to clear scanner", error)
+        })
+        scannerRef.current = null
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, showScanner, activeTab])

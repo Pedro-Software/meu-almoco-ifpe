@@ -28,7 +28,8 @@ export function TicketButton({ onTicketIssued }: TicketButtonProps) {
       const { data, error: rpcError } = await supabase.rpc('issue_ticket')
       
       if (rpcError) {
-        setError('Erro de conexão ao tentar emitir ficha.')
+        console.error('RPC Error details:', rpcError)
+        setError(`Erro no servidor: ${rpcError.message || rpcError.details || 'Erro desconhecido'}`)
       } else if (data.error) {
         setError(data.error)
       } else if (data.success) {

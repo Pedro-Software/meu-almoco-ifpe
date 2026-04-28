@@ -53,11 +53,13 @@ export async function updateSession(request: NextRequest) {
 
   // Proteção admin
   if (request.nextUrl.pathname.startsWith('/admin') && user) {
-    const { data: profile } = await supabase
+    const { data: profile, error } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .single()
+
+    console.log('[Middleware] Admin check:', { user_id: user.id, profile, error })
 
     if (!profile || profile.role !== 'admin') {
       const url = request.nextUrl.clone()
