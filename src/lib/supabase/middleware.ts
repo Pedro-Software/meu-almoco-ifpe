@@ -25,6 +25,16 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
+  // Rotas públicas que NÃO precisam de auth
+  const publicRoutes = ['/painel']
+  const isPublicRoute = publicRoutes.some((route) =>
+    request.nextUrl.pathname.startsWith(route)
+  )
+
+  if (isPublicRoute) {
+    return supabaseResponse
+  }
+
   const {
     data: { user },
   } = await supabase.auth.getUser()

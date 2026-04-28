@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { TicketButton } from '@/components/TicketButton'
 import { QueuePanel } from '@/components/QueuePanel'
 import { QRCodeDisplay } from '@/components/QRCodeDisplay'
+import { QueueAlert } from '@/components/QueueAlert'
 import { LogOut } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
@@ -51,6 +52,11 @@ export default function Dashboard() {
     )
   }
 
+  const peopleAhead = ticket?.queue_number 
+    ? Math.max(0, ticket.queue_number - queueInfo.currentNumber) 
+    : 0
+  const isYourTurn = ticket?.status === 'waiting' && peopleAhead === 0 && queueInfo.currentNumber > 0
+
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <header className="bg-[#00913f] text-white p-6 rounded-b-3xl shadow-lg">
@@ -64,6 +70,16 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-md mx-auto mt-6 px-4 space-y-6">
+        {/* Sistema de Alertas */}
+        {ticket?.status === 'waiting' && (
+          <QueueAlert
+            peopleAhead={peopleAhead}
+            alertThreshold={queueInfo.alertThreshold}
+            isYourTurn={isYourTurn}
+            hasTicket={!!ticket}
+          />
+        )}
+
         <QueuePanel 
           queueInfo={queueInfo} 
           userQueueNumber={ticket?.queue_number} 

@@ -9,6 +9,7 @@ interface QueueInfo {
   totalToday: number
   avgServiceTime: number
   maxTickets: number
+  alertThreshold: number
 }
 
 export function useRealtimeQueue() {
@@ -18,6 +19,7 @@ export function useRealtimeQueue() {
     totalToday: 0,
     avgServiceTime: 45,
     maxTickets: 200,
+    alertThreshold: 10,
   })
   const [loading, setLoading] = useState(true)
 
@@ -32,6 +34,7 @@ export function useRealtimeQueue() {
         totalToday: data.total_today || 0,
         avgServiceTime: data.avg_service_time_seconds || 45,
         maxTickets: data.max_tickets || 200,
+        alertThreshold: data.alert_threshold || 10,
       })
     }
     setLoading(false)

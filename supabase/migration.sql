@@ -1,127 +1,32 @@
 -- ============================================
--- SCHEMA: Meu Almoço IFPE
--- Sistema de Fila do Refeitório
+-- MIGRAÇÃO: Meu Almoço IFPE
+-- Cole TUDO isso no SQL Editor do Supabase e clique "Run"
 -- ============================================
 
--- 1. Tabela de Perfis
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  full_name TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- 1. Novas colunas nos tickets
+ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS entered_at TIMESTAMPTZ;
+ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS exited_at TIMESTAMPTZ;
 
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+-- 2. Novo campo de threshold de alerta
+ALTER TABLE public.queue_state ADD COLUMN IF NOT EXISTS alert_threshold INTEGER NOT NULL DEFAULT 10;
 
--- Políticas de perfil
-CREATE POLICY "Usuários podem ver seu próprio perfil"
-  ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
+-- 3. Atualizar constraint de status para incluir 'skipped'
+ALTER TABLE public.tickets DROP CONSTRAINT IF EXISTS tickets_status_check;
+ALTER TABLE public.tickets ADD CONSTRAINT tickets_status_check CHECK (status IN ('waiting', 'used', 'skipped'));
 
-CREATE POLICY "Usuários podem atualizar seu próprio perfil"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
-CREATE POLICY "Inserção de perfil via trigger"
-  ON public.profiles FOR INSERT
-  WITH CHECK (auth.uid() = id);
-
--- Admins podem ver todos os perfis
-CREATE POLICY "Admins podem ver todos os perfis"
-  ON public.profiles FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles
-      WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
-
--- 2. Tabela de Tickets (Fichas)
-CREATE TABLE IF NOT EXISTS public.tickets (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  student_name TEXT NOT NULL,
-  queue_number INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'used', 'skipped')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  qr_token TEXT,
-  entered_at TIMESTAMPTZ,
-  exited_at TIMESTAMPTZ
-);
-
-ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
-
--- Índices para performance
-CREATE INDEX IF NOT EXISTS idx_tickets_user_date ON public.tickets (user_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_tickets_qr_token ON public.tickets (qr_token);
-CREATE INDEX IF NOT EXISTS idx_tickets_date_status ON public.tickets (created_at, status);
-CREATE INDEX IF NOT EXISTS idx_tickets_queue_number ON public.tickets (created_at, queue_number);
-
--- Políticas de tickets
-CREATE POLICY "Alunos podem ver seus próprios tickets"
-  ON public.tickets FOR SELECT
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Admins podem ver todos os tickets"
-  ON public.tickets FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles
-      WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
-
-CREATE POLICY "Admins podem atualizar tickets"
-  ON public.tickets FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles
-      WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
-
--- Política para permitir inserção de tickets (necessário para requeue)
-CREATE POLICY "Sistema pode inserir tickets"
-  ON public.tickets FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-
--- 3. Tabela de Estado da Fila
-CREATE TABLE IF NOT EXISTS public.queue_state (
-  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  current_number INTEGER NOT NULL DEFAULT 0,
-  last_reset_date DATE NOT NULL DEFAULT CURRENT_DATE,
-  avg_service_time_seconds INTEGER NOT NULL DEFAULT 45,
-  max_tickets INTEGER NOT NULL DEFAULT 200,
-  alert_threshold INTEGER NOT NULL DEFAULT 10
-);
-
-ALTER TABLE public.queue_state ENABLE ROW LEVEL SECURITY;
-
--- Qualquer autenticado pode ler o estado da fila
-CREATE POLICY "Autenticados podem ver estado da fila"
-  ON public.queue_state FOR SELECT
-  USING (auth.role() = 'authenticated');
-
--- Apenas admins podem atualizar o estado da fila
-CREATE POLICY "Admins podem atualizar estado da fila"
-  ON public.queue_state FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles
-      WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
-
--- Inserir estado inicial da fila
-INSERT INTO public.queue_state (id, current_number, last_reset_date, avg_service_time_seconds, max_tickets, alert_threshold)
-VALUES (1, 0, CURRENT_DATE, 45, 200, 10)
-ON CONFLICT (id) DO NOTHING;
+-- 4. Política para inserção de tickets (necessário para requeue)
+DO $$ BEGIN
+  CREATE POLICY "Sistema pode inserir tickets"
+    ON public.tickets FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ============================================
--- 4. FUNÇÕES RPC
+-- 5. FUNÇÕES RPC (CREATE OR REPLACE = seguro re-executar)
 -- ============================================
 
--- 4a. Reset diário da fila (chamado automaticamente)
+-- 5a. Reset diário da fila
 CREATE OR REPLACE FUNCTION public.reset_daily_queue()
 RETURNS void
 LANGUAGE plpgsql
@@ -136,7 +41,7 @@ BEGIN
 END;
 $$;
 
--- 4b. Emitir ficha (RPC principal do aluno)
+-- 5b. Emitir ficha (atualizado: verifica status IN ('waiting','used'))
 CREATE OR REPLACE FUNCTION public.issue_ticket()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -152,16 +57,13 @@ DECLARE
   v_max_tickets INTEGER;
   v_total_today INTEGER;
 BEGIN
-  -- Obter ID do usuário autenticado
   v_user_id := auth.uid();
   IF v_user_id IS NULL THEN
     RETURN jsonb_build_object('error', 'Usuário não autenticado');
   END IF;
 
-  -- Resetar fila se for um novo dia
   PERFORM public.reset_daily_queue();
 
-  -- Verificar horário: só permite entre 11:30 e 13:00
   v_current_time := LOCALTIME;
   IF v_current_time < '11:30:00'::TIME THEN
     RETURN jsonb_build_object('error', 'A emissão de fichas abre às 11:30');
@@ -170,7 +72,6 @@ BEGIN
     RETURN jsonb_build_object('error', 'A emissão de fichas encerrou às 13:00');
   END IF;
 
-  -- Verificar limite de fichas do dia
   SELECT max_tickets INTO v_max_tickets FROM public.queue_state WHERE id = 1;
   SELECT COUNT(*) INTO v_total_today
   FROM public.tickets
@@ -180,7 +81,6 @@ BEGIN
     RETURN jsonb_build_object('error', 'Cota diária de almoço atingida');
   END IF;
 
-  -- Verificar se o usuário já tem ficha ativa hoje (waiting ou used)
   IF EXISTS (
     SELECT 1 FROM public.tickets
     WHERE user_id = v_user_id
@@ -190,7 +90,6 @@ BEGIN
     RETURN jsonb_build_object('error', 'Você já pegou sua ficha hoje');
   END IF;
 
-  -- Obter nome do estudante
   SELECT full_name INTO v_student_name
   FROM public.profiles
   WHERE id = v_user_id;
@@ -199,13 +98,11 @@ BEGIN
     RETURN jsonb_build_object('error', 'Perfil não encontrado');
   END IF;
 
-  -- Gerar número sequencial (atômico com lock)
   SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_queue_number
   FROM public.tickets
   WHERE created_at::date = CURRENT_DATE
   FOR UPDATE;
 
-  -- Gerar token QR único
   v_ticket_id := gen_random_uuid();
   v_qr_token := encode(
     sha256(
@@ -214,11 +111,9 @@ BEGIN
     'hex'
   );
 
-  -- Inserir ficha
   INSERT INTO public.tickets (id, user_id, student_name, queue_number, status, qr_token)
   VALUES (v_ticket_id, v_user_id, v_student_name, v_queue_number, 'waiting', v_qr_token);
 
-  -- Retornar dados da ficha
   RETURN jsonb_build_object(
     'success', true,
     'ticket', jsonb_build_object(
@@ -233,7 +128,7 @@ BEGIN
 END;
 $$;
 
--- 4c. Validar ficha (RPC do admin) - Agora com entered_at
+-- 5c. Validar ficha (atualizado: registra entered_at)
 CREATE OR REPLACE FUNCTION public.validate_ticket(p_qr_token TEXT)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -245,7 +140,6 @@ DECLARE
   v_is_admin BOOLEAN;
   v_result_type TEXT;
 BEGIN
-  -- Verificar se é admin
   SELECT EXISTS (
     SELECT 1 FROM public.profiles
     WHERE id = auth.uid() AND role = 'admin'
@@ -255,15 +149,12 @@ BEGIN
     RETURN jsonb_build_object('error', 'Acesso negado');
   END IF;
 
-  -- Resetar fila se for novo dia
   PERFORM public.reset_daily_queue();
 
-  -- Buscar ticket pelo token
   SELECT * INTO v_ticket
   FROM public.tickets
   WHERE qr_token = p_qr_token;
 
-  -- Token não encontrado
   IF NOT FOUND THEN
     RETURN jsonb_build_object(
       'type', 'error',
@@ -271,7 +162,6 @@ BEGIN
     );
   END IF;
 
-  -- Verificar se é do dia atual
   IF v_ticket.created_at::date != CURRENT_DATE THEN
     RETURN jsonb_build_object(
       'type', 'error',
@@ -280,7 +170,6 @@ BEGIN
     );
   END IF;
 
-  -- Verificar se já foi usado
   IF v_ticket.status = 'used' THEN
     RETURN jsonb_build_object(
       'type', 'error',
@@ -290,11 +179,9 @@ BEGIN
     );
   END IF;
 
-  -- Obter número atual da fila
   SELECT current_number INTO v_current_number
   FROM public.queue_state WHERE id = 1;
 
-  -- Verificar sequência
   IF v_ticket.queue_number = v_current_number + 1 THEN
     v_result_type := 'success';
   ELSIF v_ticket.queue_number > v_current_number + 1 THEN
@@ -303,19 +190,16 @@ BEGIN
     v_result_type := 'success';
   END IF;
 
-  -- Marcar como usado, registrar entered_at e INVALIDAR o qr_token (anti-replay)
   UPDATE public.tickets
   SET status = 'used',
       qr_token = NULL,
       entered_at = now()
   WHERE id = v_ticket.id;
 
-  -- Atualizar número atual da fila
   UPDATE public.queue_state
   SET current_number = GREATEST(current_number, v_ticket.queue_number)
   WHERE id = 1;
 
-  -- Verificar se há fichas puladas
   IF v_result_type = 'skip_alert' THEN
     RETURN jsonb_build_object(
       'type', 'skip_alert',
@@ -335,7 +219,7 @@ BEGIN
 END;
 $$;
 
--- 4d. Obter informações da fila em tempo real
+-- 5d. Obter informações da fila (atualizado: inclui alert_threshold)
 CREATE OR REPLACE FUNCTION public.get_queue_info()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -349,7 +233,6 @@ DECLARE
   v_max_tickets INTEGER;
   v_alert_threshold INTEGER;
 BEGIN
-  -- Resetar se novo dia
   PERFORM public.reset_daily_queue();
 
   SELECT current_number, avg_service_time_seconds, max_tickets, alert_threshold
@@ -375,7 +258,7 @@ BEGIN
 END;
 $$;
 
--- 4e. Obter ticket do usuário atual (para o dia)
+-- 5e. Obter ticket do usuário (atualizado: filtra por status ativo)
 CREATE OR REPLACE FUNCTION public.get_my_ticket()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -410,7 +293,7 @@ BEGIN
 END;
 $$;
 
--- 4f. Pular e reenviar ao final da fila (admin)
+-- 5f. NOVO: Pular e reenviar ao final da fila
 CREATE OR REPLACE FUNCTION public.skip_and_requeue(p_ticket_id UUID)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -423,7 +306,6 @@ DECLARE
   v_new_ticket_id UUID;
   v_new_qr_token TEXT;
 BEGIN
-  -- Verificar se é admin
   SELECT EXISTS (
     SELECT 1 FROM public.profiles
     WHERE id = auth.uid() AND role = 'admin'
@@ -433,7 +315,6 @@ BEGIN
     RETURN jsonb_build_object('error', 'Acesso negado');
   END IF;
 
-  -- Buscar ticket
   SELECT * INTO v_ticket
   FROM public.tickets
   WHERE id = p_ticket_id
@@ -444,18 +325,15 @@ BEGIN
     RETURN jsonb_build_object('error', 'Ficha não encontrada ou já utilizada');
   END IF;
 
-  -- Marcar como pulado
   UPDATE public.tickets
   SET status = 'skipped',
       qr_token = NULL
   WHERE id = v_ticket.id;
 
-  -- Gerar novo número (final da fila)
   SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_new_queue_number
   FROM public.tickets
   WHERE created_at::date = CURRENT_DATE;
 
-  -- Gerar novo token QR
   v_new_ticket_id := gen_random_uuid();
   v_new_qr_token := encode(
     sha256(
@@ -464,11 +342,9 @@ BEGIN
     'hex'
   );
 
-  -- Criar novo ticket no final da fila
   INSERT INTO public.tickets (id, user_id, student_name, queue_number, status, qr_token)
   VALUES (v_new_ticket_id, v_ticket.user_id, v_ticket.student_name, v_new_queue_number, 'waiting', v_new_qr_token);
 
-  -- Avançar o número atual se necessário
   UPDATE public.queue_state
   SET current_number = GREATEST(current_number, v_ticket.queue_number)
   WHERE id = 1;
@@ -483,7 +359,7 @@ BEGIN
 END;
 $$;
 
--- 4g. Registrar saída do refeitório
+-- 5g. NOVO: Registrar saída do refeitório
 CREATE OR REPLACE FUNCTION public.mark_exit(p_ticket_id UUID)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -494,7 +370,6 @@ DECLARE
   v_is_admin BOOLEAN;
   v_duration INTERVAL;
 BEGIN
-  -- Verificar se é admin
   SELECT EXISTS (
     SELECT 1 FROM public.profiles
     WHERE id = auth.uid() AND role = 'admin'
@@ -530,7 +405,7 @@ BEGIN
 END;
 $$;
 
--- 4h. Obter informações do painel público (sem auth)
+-- 5h. NOVO: Painel público (próximos 10, últimos atendidos)
 CREATE OR REPLACE FUNCTION public.get_public_panel_info()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -561,7 +436,6 @@ BEGIN
   FROM public.tickets
   WHERE created_at::date = CURRENT_DATE;
 
-  -- Próximos 10 na fila
   SELECT COALESCE(jsonb_agg(
     jsonb_build_object(
       'queue_number', t.queue_number,
@@ -578,7 +452,6 @@ BEGIN
     LIMIT 10
   ) t;
 
-  -- Últimos 5 atendidos
   SELECT COALESCE(jsonb_agg(
     jsonb_build_object(
       'queue_number', t.queue_number,
@@ -606,7 +479,7 @@ BEGIN
 END;
 $$;
 
--- 4i. Estatísticas para o admin
+-- 5i. NOVO: Estatísticas do admin
 CREATE OR REPLACE FUNCTION public.get_admin_stats()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -614,7 +487,6 @@ SECURITY DEFINER
 AS $$
 DECLARE
   v_is_admin BOOLEAN;
-  v_today_stats jsonb;
   v_avg_duration NUMERIC;
   v_currently_inside INTEGER;
   v_skipped_count INTEGER;
@@ -628,7 +500,6 @@ BEGIN
     RETURN jsonb_build_object('error', 'Acesso negado');
   END IF;
 
-  -- Tempo médio de permanência (em minutos)
   SELECT COALESCE(
     AVG(EXTRACT(EPOCH FROM (exited_at - entered_at)) / 60), 0
   ) INTO v_avg_duration
@@ -637,7 +508,6 @@ BEGIN
     AND entered_at IS NOT NULL
     AND exited_at IS NOT NULL;
 
-  -- Pessoas atualmente no refeitório
   SELECT COUNT(*) INTO v_currently_inside
   FROM public.tickets
   WHERE created_at::date = CURRENT_DATE
@@ -645,7 +515,6 @@ BEGIN
     AND entered_at IS NOT NULL
     AND exited_at IS NULL;
 
-  -- Fichas puladas hoje
   SELECT COUNT(*) INTO v_skipped_count
   FROM public.tickets
   WHERE created_at::date = CURRENT_DATE
@@ -659,8 +528,7 @@ BEGIN
 END;
 $$;
 
--- 4j. Promover usuário a admin (EXECUTAR MANUALMENTE NO SUPABASE)
--- USE: SELECT public.promote_to_admin('email@ifpe.edu.br');
+-- 5j. NOVO: Promover usuário a admin
 CREATE OR REPLACE FUNCTION public.promote_to_admin(p_email TEXT)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -688,7 +556,7 @@ BEGIN
 END;
 $$;
 
--- 4k. Obter lista de fichas na fila (para admin gerenciar)
+-- 5k. NOVO: Listar fichas na fila (para admin gerenciar)
 CREATE OR REPLACE FUNCTION public.get_waiting_tickets()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -724,54 +592,5 @@ BEGIN
 END;
 $$;
 
--- ============================================
--- 5. TRIGGER: Criar perfil ao registrar
--- ============================================
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  INSERT INTO public.profiles (id, full_name, role)
-  VALUES (
-    NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', 'Estudante'),
-    'student'
-  );
-  RETURN NEW;
-END;
-$$;
-
--- Trigger que dispara ao criar novo usuário
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-
--- ============================================
--- 6. HABILITAR REALTIME
--- ============================================
--- Execute no Supabase Dashboard: Database > Replication
--- Habilitar realtime para as tabelas: tickets, queue_state
-
-ALTER PUBLICATION supabase_realtime ADD TABLE public.tickets;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.queue_state;
-
--- ============================================
--- 7. GRANT para funções públicas (painel sem auth)
--- ============================================
--- A função get_public_panel_info usa SECURITY DEFINER,
--- então funciona com a service_role key.
--- Para acesso anon, execute no SQL Editor do Supabase:
--- GRANT EXECUTE ON FUNCTION public.get_public_panel_info() TO anon;
-
--- ============================================
--- 8. MIGRAÇÕES (executar se o banco já existe)
--- ============================================
--- ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS entered_at TIMESTAMPTZ;
--- ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS exited_at TIMESTAMPTZ;
--- ALTER TABLE public.queue_state ADD COLUMN IF NOT EXISTS alert_threshold INTEGER NOT NULL DEFAULT 10;
--- ALTER TABLE public.tickets DROP CONSTRAINT IF EXISTS tickets_status_check;
--- ALTER TABLE public.tickets ADD CONSTRAINT tickets_status_check CHECK (status IN ('waiting', 'used', 'skipped'));
+-- 6. Liberar painel público sem login
+GRANT EXECUTE ON FUNCTION public.get_public_panel_info() TO anon;
