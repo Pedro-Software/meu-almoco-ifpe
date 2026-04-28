@@ -223,14 +223,14 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-gray-900 pb-20">
-      <header className="bg-gray-800 text-white p-6 shadow-lg relative z-10 border-b border-gray-700">
+      <header className="bg-gray-800 text-white p-4 sm:p-6 shadow-lg relative z-10 border-b border-gray-700">
         <div className="flex justify-between items-center max-w-4xl mx-auto">
           <div>
-            <h1 className="text-xl font-bold flex items-center gap-2">
+            <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
               <QrCode className="w-5 h-5 text-green-400" />
-              Painel do Administrador
+              Painel Admin
             </h1>
-            <p className="text-sm text-gray-400 mt-1">Meu Almoço IFPE — Gerenciamento</p>
+            <p className="text-xs sm:text-sm text-gray-400 mt-1">Meu Almoço IFPE — Gerenciamento</p>
           </div>
           <button onClick={() => supabase.auth.signOut().then(() => router.push('/login'))} className="p-2 hover:bg-gray-700 rounded-full transition-colors">
             <LogOut size={20} />
@@ -241,60 +241,60 @@ export default function AdminPage() {
       <main className="max-w-4xl mx-auto mt-6 px-4 space-y-6">
         
         {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 text-center">
-            <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Chamando</span>
-            <span className="text-3xl font-black text-green-400">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 sm:p-4 text-center">
+            <span className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Chamando</span>
+            <span className="text-2xl sm:text-3xl font-black text-green-400">
               #{queueInfo?.currentNumber || 0}
             </span>
           </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 text-center">
-            <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Na Fila</span>
-            <span className="text-3xl font-black text-blue-400">
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 sm:p-4 text-center">
+            <span className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Na Fila</span>
+            <span className="text-2xl sm:text-3xl font-black text-blue-400">
               {queueInfo?.totalWaiting || 0}
             </span>
           </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 text-center">
-            <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Dentro Agora</span>
-            <span className="text-3xl font-black text-yellow-400">
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 sm:p-4 text-center">
+            <span className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Dentro</span>
+            <span className="text-2xl sm:text-3xl font-black text-yellow-400">
               {adminStats?.currently_inside || 0}
             </span>
           </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 text-center">
-            <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Total Hoje</span>
-            <span className="text-3xl font-black text-white">
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 sm:p-4 text-center">
+            <span className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Total</span>
+            <span className="text-2xl sm:text-3xl font-black text-white">
               {queueInfo?.totalToday || 0}
             </span>
           </div>
         </div>
 
         {/* Extra Stats */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 flex items-center gap-3">
-            <div className="p-2 bg-orange-500/20 rounded-lg">
-              <Clock className="w-5 h-5 text-orange-400" />
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-2 sm:p-3 flex flex-col sm:flex-row items-center gap-1 sm:gap-3">
+            <div className="p-1.5 sm:p-2 bg-orange-500/20 rounded-lg">
+              <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />
             </div>
-            <div>
-              <span className="text-lg font-bold text-white">{adminStats?.avg_duration_minutes || 0} min</span>
-              <span className="block text-xs text-gray-400">Tempo Médio</span>
-            </div>
-          </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 flex items-center gap-3">
-            <div className="p-2 bg-red-500/20 rounded-lg">
-              <UserX className="w-5 h-5 text-red-400" />
-            </div>
-            <div>
-              <span className="text-lg font-bold text-white">{adminStats?.skipped_count || 0}</span>
-              <span className="block text-xs text-gray-400">Pulados</span>
+            <div className="text-center sm:text-left">
+              <span className="text-sm sm:text-lg font-bold text-white">{adminStats?.avg_duration_minutes || 0}m</span>
+              <span className="block text-[10px] sm:text-xs text-gray-400">Tempo Médio</span>
             </div>
           </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 flex items-center gap-3">
-            <div className="p-2 bg-green-500/20 rounded-lg">
-              <BarChart3 className="w-5 h-5 text-green-400" />
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-2 sm:p-3 flex flex-col sm:flex-row items-center gap-1 sm:gap-3">
+            <div className="p-1.5 sm:p-2 bg-red-500/20 rounded-lg">
+              <UserX className="w-4 h-4 sm:w-5 sm:h-5 text-red-400" />
             </div>
-            <div>
-              <span className="text-lg font-bold text-white">{queueInfo?.maxTickets || 200}</span>
-              <span className="block text-xs text-gray-400">Cota Diária</span>
+            <div className="text-center sm:text-left">
+              <span className="text-sm sm:text-lg font-bold text-white">{adminStats?.skipped_count || 0}</span>
+              <span className="block text-[10px] sm:text-xs text-gray-400">Pulados</span>
+            </div>
+          </div>
+          <div className="bg-gray-800 rounded-xl border border-gray-700 p-2 sm:p-3 flex flex-col sm:flex-row items-center gap-1 sm:gap-3">
+            <div className="p-1.5 sm:p-2 bg-green-500/20 rounded-lg">
+              <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />
+            </div>
+            <div className="text-center sm:text-left">
+              <span className="text-sm sm:text-lg font-bold text-white">{queueInfo?.maxTickets || 200}</span>
+              <span className="block text-[10px] sm:text-xs text-gray-400">Cota</span>
             </div>
           </div>
         </div>
@@ -303,18 +303,18 @@ export default function AdminPage() {
         <div className="flex bg-gray-800 rounded-xl p-1 border border-gray-700">
           <button
             onClick={() => setActiveTab('scanner')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all ${
               activeTab === 'scanner' 
                 ? 'bg-green-600 text-white shadow-lg' 
                 : 'text-gray-400 hover:text-white'
             }`}
           >
             <ScanLine className="w-4 h-4" />
-            Scanner QR
+            <span className="hidden sm:inline">Scanner</span> QR
           </button>
           <button
             onClick={() => setActiveTab('queue')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all ${
               activeTab === 'queue' 
                 ? 'bg-green-600 text-white shadow-lg' 
                 : 'text-gray-400 hover:text-white'
@@ -325,14 +325,14 @@ export default function AdminPage() {
           </button>
           <button
             onClick={() => setActiveTab('stats')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all ${
               activeTab === 'stats' 
                 ? 'bg-green-600 text-white shadow-lg' 
                 : 'text-gray-400 hover:text-white'
             }`}
           >
             <BarChart3 className="w-4 h-4" />
-            Relatório
+            <span className="hidden sm:inline">Relatório</span><span className="sm:hidden">Stats</span>
           </button>
         </div>
 
@@ -380,18 +380,18 @@ export default function AdminPage() {
                   return (
                     <div 
                       key={ticket.id}
-                      className={`flex items-center justify-between p-4 ${
+                      className={`flex items-center justify-between gap-2 p-3 sm:p-4 ${
                         isPast ? 'bg-red-900/20' : index === 0 ? 'bg-yellow-900/20' : ''
                       }`}
                     >
-                      <div className="flex items-center gap-4">
-                        <span className={`text-2xl font-black tabular-nums ${
+                      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                        <span className={`text-lg sm:text-2xl font-black tabular-nums flex-shrink-0 ${
                           isPast ? 'text-red-400' : index === 0 ? 'text-yellow-400' : 'text-gray-300'
                         }`}>
                           #{ticket.queue_number.toString().padStart(3, '0')}
                         </span>
-                        <div>
-                          <span className="text-white font-medium block">{ticket.student_name}</span>
+                        <div className="min-w-0">
+                          <span className="text-white font-medium block text-sm sm:text-base truncate">{ticket.student_name}</span>
                           {isPast && (
                             <span className="text-red-400 text-xs flex items-center gap-1">
                               <AlertTriangle className="w-3 h-3" /> Não compareceu
@@ -402,10 +402,10 @@ export default function AdminPage() {
                       <button
                         onClick={() => handleSkipAndRequeue(ticket.id, ticket.student_name)}
                         disabled={loadingAction === ticket.id}
-                        className="flex items-center gap-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-600/30 px-4 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
+                        className="flex items-center gap-1 sm:gap-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-600/30 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all disabled:opacity-50 flex-shrink-0"
                       >
-                        <SkipForward className="w-4 h-4" />
-                        {loadingAction === ticket.id ? 'Pulando...' : 'Pular'}
+                        <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        {loadingAction === ticket.id ? '...' : 'Pular'}
                       </button>
                     </div>
                   )
@@ -428,15 +428,15 @@ export default function AdminPage() {
                 Relatório do Dia
               </h3>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-700/50 rounded-xl p-4">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="p-2 bg-green-500/20 rounded-lg">
-                      <CheckCircle2 className="w-5 h-5 text-green-400" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div className="bg-gray-700/50 rounded-xl p-3 sm:p-4">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                    <div className="p-1.5 sm:p-2 bg-green-500/20 rounded-lg">
+                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />
                     </div>
-                    <span className="text-gray-300 font-medium">Fichas Emitidas</span>
+                    <span className="text-gray-300 font-medium text-sm sm:text-base">Fichas Emitidas</span>
                   </div>
-                  <span className="text-4xl font-black text-white">{queueInfo?.totalToday || 0}</span>
+                  <span className="text-3xl sm:text-4xl font-black text-white">{queueInfo?.totalToday || 0}</span>
                   <div className="mt-2 bg-gray-600/50 rounded-full h-2">
                     <div 
                       className="bg-green-500 h-2 rounded-full transition-all duration-500"
@@ -448,14 +448,14 @@ export default function AdminPage() {
                   </span>
                 </div>
 
-                <div className="bg-gray-700/50 rounded-xl p-4">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="p-2 bg-blue-500/20 rounded-lg">
-                      <Users className="w-5 h-5 text-blue-400" />
+                <div className="bg-gray-700/50 rounded-xl p-3 sm:p-4">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                    <div className="p-1.5 sm:p-2 bg-blue-500/20 rounded-lg">
+                      <Users className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
                     </div>
-                    <span className="text-gray-300 font-medium">Atendidos</span>
+                    <span className="text-gray-300 font-medium text-sm sm:text-base">Atendidos</span>
                   </div>
-                  <span className="text-4xl font-black text-white">
+                  <span className="text-3xl sm:text-4xl font-black text-white">
                     {(queueInfo?.totalToday || 0) - (queueInfo?.totalWaiting || 0)}
                   </span>
                   <span className="text-gray-400 text-sm ml-2">
@@ -463,27 +463,27 @@ export default function AdminPage() {
                   </span>
                 </div>
 
-                <div className="bg-gray-700/50 rounded-xl p-4">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="p-2 bg-orange-500/20 rounded-lg">
-                      <Clock className="w-5 h-5 text-orange-400" />
+                <div className="bg-gray-700/50 rounded-xl p-3 sm:p-4">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                    <div className="p-1.5 sm:p-2 bg-orange-500/20 rounded-lg">
+                      <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />
                     </div>
-                    <span className="text-gray-300 font-medium">Tempo Médio Refeição</span>
+                    <span className="text-gray-300 font-medium text-sm sm:text-base">Tempo Médio</span>
                   </div>
-                  <span className="text-4xl font-black text-white">
+                  <span className="text-3xl sm:text-4xl font-black text-white">
                     {adminStats?.avg_duration_minutes || '—'}
                   </span>
-                  <span className="text-gray-400 text-sm ml-2">minutos</span>
+                  <span className="text-gray-400 text-sm ml-2">min</span>
                 </div>
 
-                <div className="bg-gray-700/50 rounded-xl p-4">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="p-2 bg-yellow-500/20 rounded-lg">
-                      <DoorOpen className="w-5 h-5 text-yellow-400" />
+                <div className="bg-gray-700/50 rounded-xl p-3 sm:p-4">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
+                    <div className="p-1.5 sm:p-2 bg-yellow-500/20 rounded-lg">
+                      <DoorOpen className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400" />
                     </div>
-                    <span className="text-gray-300 font-medium">No Refeitório Agora</span>
+                    <span className="text-gray-300 font-medium text-sm sm:text-base">No Refeitório</span>
                   </div>
-                  <span className="text-4xl font-black text-white">
+                  <span className="text-3xl sm:text-4xl font-black text-white">
                     {adminStats?.currently_inside || 0}
                   </span>
                   <span className="text-gray-400 text-sm ml-2">pessoas</span>
