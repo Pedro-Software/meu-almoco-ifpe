@@ -85,27 +85,76 @@ export default function Dashboard() {
           userQueueNumber={ticket?.queue_number} 
         />
 
-        {!ticket ? (
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">Sua Ficha</h2>
-            <TicketButton onTicketIssued={(newTicket) => setTicket(newTicket)} />
-          </div>
-        ) : ticket.status === 'waiting' ? (
-          <QRCodeDisplay 
-            qrToken={ticket.qr_token} 
-            queueNumber={ticket.queue_number} 
-          />
-        ) : (
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 text-center">
-            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
+        {(() => {
+          const now = new Date()
+          const currentMinutes = now.getHours() * 60 + now.getMinutes()
+          const isAfterService = currentMinutes > 840 // após 14:00
+          const isServiceClosed = currentMinutes > 780 // após 13:00
+
+          // Ficha usada e já passou das 14h → mostrar estado "encerrado"
+          if (ticket?.status === 'used' && isAfterService) {
+            return (
+              <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 text-center">
+                <div className="w-16 h-16 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h2 className="text-xl font-bold text-gray-800 mb-2">Refeitório Encerrado</h2>
+                <p className="text-gray-500">O horário de almoço de hoje já encerrou.</p>
+                <p className="text-gray-400 text-sm mt-2">Volte amanhã a partir das 11:30!</p>
+              </div>
+            )
+          }
+
+          // Sem ficha
+          if (!ticket) {
+            // Depois do horário de emissão → mostrar estado fechado
+            if (isServiceClosed) {
+              return (
+                <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 text-center">
+                  <div className="w-16 h-16 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-xl font-bold text-gray-800 mb-2">Emissão Encerrada</h2>
+                  <p className="text-gray-500">O horário de emissão de fichas encerrou às 13:00.</p>
+                  <p className="text-gray-400 text-sm mt-2">Volte amanhã a partir das 11:30!</p>
+                </div>
+              )
+            }
+            return (
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">Sua Ficha</h2>
+                <TicketButton onTicketIssued={(newTicket) => setTicket(newTicket)} />
+              </div>
+            )
+          }
+
+          // Ficha aguardando → mostrar QR Code
+          if (ticket.status === 'waiting') {
+            return (
+              <QRCodeDisplay 
+                qrToken={ticket.qr_token} 
+                queueNumber={ticket.queue_number} 
+              />
+            )
+          }
+
+          // Ficha usada (durante o serviço) → Bom Apetite
+          return (
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 text-center">
+              <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Bom Apetite!</h2>
+              <p className="text-gray-600">Sua ficha já foi utilizada hoje.</p>
             </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Bom Apetite!</h2>
-            <p className="text-gray-600">Sua ficha já foi utilizada hoje.</p>
-          </div>
-        )}
+          )
+        })()}
       </main>
     </div>
   )
