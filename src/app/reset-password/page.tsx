@@ -4,66 +4,47 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, Utensils, AlertCircle, ArrowLeft, Mail, CheckCircle2 } from 'lucide-react'
+import { Loader2, Utensils, AlertCircle, ArrowLeft, CheckCircle2, Lock } from 'lucide-react'
 
-export default function Login() {
-  const [email, setEmail] = useState('')
+export default function ResetPassword() {
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [isResetMode, setIsResetMode] = useState(false)
-  const [resetSuccess, setResetSuccess] = useState(false)
+  const [success, setSuccess] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
 
-    if (!email.endsWith('@discente.ifpe.edu.br') && !email.endsWith('@ifpe.edu.br')) {
-      setError('Apenas e-mails institucionais do IFPE são permitidos.')
+    if (password.length < 6) {
+      setError('A senha deve ter pelo menos 6 caracteres.')
       setLoading(false)
       return
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+    if (password !== confirmPassword) {
+      setError('As senhas não coincidem.')
+      setLoading(false)
+      return
+    }
+
+    const { error } = await supabase.auth.updateUser({
+      password: password,
     })
 
     if (error) {
       setError(error.message)
       setLoading(false)
     } else {
-      setResetSuccess(true)
+      setSuccess(true)
       setLoading(false)
-    }
-  }
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-
-    if (!email.endsWith('@discente.ifpe.edu.br') && !email.endsWith('@ifpe.edu.br')) {
-      setError('Apenas e-mails institucionais do IFPE são permitidos.')
-      setLoading(false)
-      return
-    }
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
-
-    if (error) {
-      setError(error.message === 'Invalid login credentials' 
-        ? 'E-mail ou senha incorretos.' 
-        : error.message)
-      setLoading(false)
-    } else {
-      router.push('/dashboard')
-      router.refresh()
+      setTimeout(() => {
+        router.push('/login')
+      }, 3000)
     }
   }
 
@@ -78,20 +59,20 @@ export default function Login() {
         <div className="absolute bottom-10 -right-10 w-64 h-64 bg-white opacity-5 rounded-full blur-2xl"></div>
 
         <div className="relative z-10 flex flex-col h-full">
-          <Link href="/" className="inline-flex items-center gap-2 text-white/70 hover:text-white transition-colors text-sm font-medium w-fit">
+          <Link href="/login" className="inline-flex items-center gap-2 text-white/70 hover:text-white transition-colors text-sm font-medium w-fit">
             <ArrowLeft className="w-4 h-4" />
-            Voltar para o início
+            Voltar para o login
           </Link>
 
           <div className="mt-auto mb-auto max-w-lg">
             <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-sm border border-white/20 mb-6 shadow-xl">
-              <Utensils className="w-8 h-8 text-white" />
+              <Lock className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-4xl lg:text-5xl font-black mb-4 leading-tight tracking-tight" style={{ fontFamily: 'var(--font-primary)' }}>
-              Acesso ao Sistema
+              Nova Senha
             </h1>
             <p className="text-lg font-medium opacity-80 leading-relaxed">
-              Gerencie suas reservas de forma rápida e segura através da sua conta institucional IFPE.
+              Defina uma senha forte para garantir a segurança da sua conta institucional.
             </p>
           </div>
           
@@ -114,7 +95,7 @@ export default function Login() {
       <div className="flex-1 md:w-7/12 bg-white flex flex-col justify-center px-6 py-12 md:px-16 lg:px-24 xl:px-32 relative">
         
         <div className="md:hidden absolute top-6 left-6">
-          <Link href="/" className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full inline-flex transition-colors">
+          <Link href="/login" className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full inline-flex transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </Link>
         </div>
@@ -122,37 +103,29 @@ export default function Login() {
         <div className="w-full max-w-md mx-auto animate-fade-in-up">
           <div className="mb-8 md:hidden text-center mt-6">
              <div className="w-12 h-12 bg-[var(--gov-blue)] rounded-xl flex items-center justify-center mx-auto mb-3 shadow-lg">
-                <Utensils className="w-6 h-6 text-white" />
+                <Lock className="w-6 h-6 text-white" />
              </div>
              <h2 className="text-xl font-black" style={{ color: 'var(--gov-blue-dark)' }}>Meu Almoço IFPE</h2>
           </div>
 
           <div className="mb-8">
             <h1 className="text-3xl font-extrabold mb-2" style={{ color: 'var(--gray-90)', fontFamily: 'var(--font-primary)' }}>
-              {isResetMode ? 'Recuperar Senha' : 'Entrar'}
+              Redefinir Senha
             </h1>
             <p className="text-[15px] leading-relaxed" style={{ color: 'var(--gray-60)' }}>
-              {isResetMode 
-                ? 'Informe seu e-mail institucional para receber o link de redefinição.' 
-                : 'Utilize seu e-mail institucional para acessar o painel do refeitório.'}
+              Digite e confirme sua nova senha de acesso abaixo.
             </p>
           </div>
 
-          {resetSuccess ? (
+          {success ? (
             <div className="p-8 rounded-xl text-center animate-fade-in" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <CheckCircle2 className="w-8 h-8 text-green-600" />
               </div>
-              <h3 className="text-lg font-bold text-green-900 mb-2">E-mail Enviado!</h3>
-              <p className="text-sm text-green-700 mb-6">
-                Enviamos um link de recuperação para <strong>{email}</strong>. Verifique sua caixa de entrada e spam.
+              <h3 className="text-lg font-bold text-green-900 mb-2">Senha Alterada!</h3>
+              <p className="text-sm text-green-700">
+                Sua senha foi atualizada com sucesso. Redirecionando para o login...
               </p>
-              <button 
-                onClick={() => { setIsResetMode(false); setResetSuccess(false); }}
-                className="text-sm font-bold underline text-green-800"
-              >
-                Voltar para o Login
-              </button>
             </div>
           ) : (
             <>
@@ -164,50 +137,38 @@ export default function Login() {
                 </div>
               )}
 
-              <form onSubmit={isResetMode ? handleResetPassword : handleLogin} className="flex flex-col gap-5">
+              <form onSubmit={handleUpdatePassword} className="flex flex-col gap-5">
                 <div>
-                  <label htmlFor="login-email" className="block text-sm font-bold mb-2" style={{ color: 'var(--gray-80)' }}>
-                    E-mail Institucional
+                  <label htmlFor="new-password" className="block text-sm font-bold mb-2" style={{ color: 'var(--gray-80)' }}>
+                    Nova Senha
                   </label>
                   <input
-                    id="login-email"
-                    type="email"
+                    id="new-password"
+                    type="password"
                     required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow"
                     style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
-                    placeholder="aluno@discente.ifpe.edu.br"
+                    placeholder="Mínimo 6 caracteres"
                   />
                 </div>
 
-                {!isResetMode && (
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label htmlFor="login-senha" className="block text-sm font-bold" style={{ color: 'var(--gray-80)' }}>
-                        Senha
-                      </label>
-                      <button 
-                        type="button"
-                        onClick={() => { setIsResetMode(true); setError(null); }}
-                        className="text-xs font-bold hover:underline" 
-                        style={{ color: 'var(--gov-blue)' }}
-                      >
-                        Esqueci minha senha
-                      </button>
-                    </div>
-                    <input
-                      id="login-senha"
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow"
-                      style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
-                      placeholder="••••••••"
-                    />
-                  </div>
-                )}
+                <div>
+                  <label htmlFor="confirm-password" className="block text-sm font-bold mb-2" style={{ color: 'var(--gray-80)' }}>
+                    Confirmar Nova Senha
+                  </label>
+                  <input
+                    id="confirm-password"
+                    type="password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow"
+                    style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
+                    placeholder="Repita a nova senha"
+                  />
+                </div>
 
                 <button
                   type="submit"
@@ -220,31 +181,11 @@ export default function Login() {
                     cursor: loading ? 'not-allowed' : 'pointer'
                   }}
                 >
-                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (isResetMode ? 'Enviar Link de Recuperação' : 'Entrar no Sistema')}
+                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Atualizar Senha'}
                 </button>
-
-                {isResetMode && (
-                  <button 
-                    type="button"
-                    onClick={() => { setIsResetMode(false); setError(null); }}
-                    className="w-full text-center text-sm font-bold mt-2"
-                    style={{ color: 'var(--gray-60)' }}
-                  >
-                    Voltar para o Login
-                  </button>
-                )}
               </form>
             </>
           )}
-
-          <div className="mt-8 pt-6 border-t border-gray-100 text-center">
-            <p className="text-[15px]" style={{ color: 'var(--gray-60)' }}>
-              Ainda não tem conta?{' '}
-              <Link href="/register" className="font-bold transition-colors hover:underline" style={{ color: 'var(--gov-blue)' }}>
-                Cadastre-se aqui
-              </Link>
-            </p>
-          </div>
 
           {/* Assinatura visível apenas no mobile */}
           <div className="md:hidden mt-8 pt-8 text-center flex flex-col items-center">
