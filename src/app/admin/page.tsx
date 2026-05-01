@@ -52,9 +52,11 @@ export default function AdminPage() {
   const [showScanner, setShowScanner] = useState(true)
   const [adminList, setAdminList] = useState<AdminUser[]>([])
   const [newAdminEmail, setNewAdminEmail] = useState('')
+  const [newAdminRole, setNewAdminRole] = useState('admin')
   const [adminActionLoading, setAdminActionLoading] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [adminSuccess, setAdminSuccess] = useState('')
+  const [processingNoShows, setProcessingNoShows] = useState(false)
   const isScanning = useRef(false)
   const { queueInfo, loading: queueLoading } = useRealtimeQueue()
   const supabase = createClient()
@@ -80,7 +82,7 @@ export default function AdminPage() {
           .eq('id', user.id)
           .single()
 
-        if (profile?.role !== 'admin') {
+        if (profile?.role !== 'admin' && profile?.role !== 'nutricionista') {
           router.push('/dashboard')
           return
         }
@@ -100,14 +102,14 @@ export default function AdminPage() {
   }, [supabase, router])
 
   const fetchWaitingTickets = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_waiting_tickets')
+    const { data, error } = await supabase.rpc('get_waiting_reservations')
     if (!error && data) {
       setWaitingTickets(Array.isArray(data) ? data : [])
     }
   }, [supabase])
 
   const fetchAdminStats = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_admin_stats')
+    const { data, error } = await supabase.rpc('get_admin_reservation_stats')
     if (!error && data && !data.error) {
       setAdminStats(data)
     }
@@ -137,7 +139,7 @@ export default function AdminPage() {
 
     setAdminActionLoading(true)
     try {
-      const { data, error } = await supabase.rpc('manage_admin', { p_email: email, p_action: 'add' })
+      const { data, error } = await supabase.rpc('manage_admin', { p_email: email, p_action: 'add', p_role: newAdminRole })
       if (error) {
         setAdminError(error.message)
       } else if (data?.error) {
@@ -197,7 +199,7 @@ export default function AdminPage() {
       .channel('admin:updates')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'tickets' },
+        { event: '*', schema: 'public', table: 'reservations' },
         () => {
           fetchWaitingTickets()
           fetchAdminStats()
@@ -242,7 +244,7 @@ export default function AdminPage() {
     isScanning.current = true
 
     try {
-      const { data, error } = await supabase.rpc('validate_ticket', { p_qr_token: decodedText })
+      const { data, error } = await supabase.rpc('validate_reservation', { p_qr_token: decodedText })
 
       if (error || (data && data.error)) {
          setFeedback({
@@ -257,18 +259,29 @@ export default function AdminPage() {
             title: 'Ficha Inválida',
             message: data.message
           })
-        } else if (data.type === 'skip_alert') {
-          setFeedback({
-            type: 'skip_alert',
-            title: 'Atenção: Número Pulado',
-            message: data.message + `\nAluno: ${data.student_name} (Senha #${data.queue_number})`
-          })
         } else if (data.type === 'success') {
           setFeedback({
             type: 'success',
             title: 'Sucesso',
             message: `Ficha ${data.queue_number} validada!\nAluno: ${data.student_name}`
           })
+          
+          // Enviar Push Notification se necessário
+          if (data.notify && data.notify.subscription) {
+            try {
+              await fetch('/api/send-push', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  subscription: data.notify.subscription,
+                  title: '🍽️ Meu Almoço IFPE',
+                  body: `Estamos no número #${data.notify.current_number.toString().padStart(3, '0')}. Faltam 5 pessoas para o seu número (#${data.notify.queue_number.toString().padStart(3, '0')})!`
+                })
+              })
+            } catch (err) {
+              console.error('Erro ao enviar push notification:', err)
+            }
+          }
         }
         // Atualizar listas
         fetchWaitingTickets()
@@ -293,7 +306,7 @@ export default function AdminPage() {
   const handleSkipAndRequeue = async (ticketId: string, studentName: string) => {
     setLoadingAction(ticketId)
     try {
-      const { data, error } = await supabase.rpc('skip_and_requeue', { p_ticket_id: ticketId })
+      const { data, error } = await supabase.rpc('skip_and_requeue_reservation', { p_reservation_id: ticketId })
       if (!error && data?.success) {
         setFeedback({
           type: 'skip_alert',
@@ -315,162 +328,170 @@ export default function AdminPage() {
     }
   }
 
+  const handleProcessNoShows = async () => {
+    if (!window.confirm('Isso vai marcar todos que não compareceram ontem como "Falta" e bloquear aqueles com 3 faltas no mês. Deseja continuar?')) return;
+    
+    setProcessingNoShows(true)
+    try {
+      const { data, error } = await supabase.rpc('process_no_shows')
+      if (error || data?.error) {
+        setFeedback({ type: 'error', title: 'Erro', message: data?.error || error?.message || 'Falha ao processar.' })
+      } else {
+        setFeedback({ 
+          type: 'success', 
+          title: 'Faltas Processadas', 
+          message: `${data.no_shows} reservas foram marcadas como falta (No-Show).\n${data.blocked} alunos foram bloqueados temporariamente por reincidência.` 
+        })
+      }
+    } catch {
+      setFeedback({ type: 'error', title: 'Erro', message: 'Falha na conexão' })
+    } finally {
+      setProcessingNoShows(false)
+    }
+  }
+
   if (!isAdmin) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-400"></div>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--gray-2)' }}>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 rounded-full animate-spin" style={{ borderColor: 'var(--gov-blue)', borderTopColor: 'transparent' }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--gray-40)' }}>Verificando permissões...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 pb-20">
-      <header className="bg-gray-800 text-white p-4 sm:p-6 shadow-lg relative z-10 border-b border-gray-700">
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--gray-2)' }}>
+
+      {/* Faixa GOV.BR */}
+      <div className="gov-header-bar px-4 py-1.5 flex items-center gap-2 text-xs">
+        <span className="font-bold tracking-wider text-white/90">GOV.BR</span>
+        <span className="text-white/40">|</span>
+        <span className="text-white/60">IFPE Belo Jardim</span>
+      </div>
+
+      {/* Header */}
+      <header style={{ background: 'var(--gov-blue-dark)', borderBottom: '3px solid var(--gov-yellow)' }} className="px-4 py-4 shadow-md sticky top-0 z-10">
         <div className="flex justify-between items-center max-w-4xl mx-auto">
-          <div>
-            <h1 className="text-lg sm:text-xl font-bold flex items-center gap-2">
-              <QrCode className="w-5 h-5 text-green-400" />
-              Painel Admin
-            </h1>
-            <p className="text-xs sm:text-sm text-gray-400 mt-1">Meu Almoço IFPE — Gerenciamento</p>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded flex items-center justify-center flex-shrink-0" style={{ background: 'var(--gov-blue)' }}>
+              <QrCode className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-white font-bold text-base sm:text-lg leading-tight">Painel Administrativo</h1>
+              <p className="text-white/50 text-xs hidden sm:block">Meu Almoço IFPE — Gerenciamento</p>
+            </div>
           </div>
-          <button onClick={() => supabase.auth.signOut().then(() => router.push('/login'))} className="p-2 hover:bg-gray-700 rounded-full transition-colors">
-            <LogOut size={20} />
+          <button
+            onClick={() => supabase.auth.signOut().then(() => router.push('/login'))}
+            className="flex items-center gap-1.5 text-white/70 hover:text-white text-xs font-semibold transition-colors px-3 py-2 rounded"
+            style={{ background: 'rgba(255,255,255,0.1)' }}
+          >
+            <LogOut size={15} />
+            <span className="hidden sm:inline">Sair</span>
           </button>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto mt-6 px-4 space-y-6">
-        
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 sm:p-4 text-center">
-            <span className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Chamando</span>
-            <span className="text-2xl sm:text-3xl font-black text-green-400">
-              #{queueInfo?.currentNumber || 0}
-            </span>
-          </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 sm:p-4 text-center">
-            <span className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Na Fila</span>
-            <span className="text-2xl sm:text-3xl font-black text-blue-400">
-              {queueInfo?.totalWaiting || 0}
-            </span>
-          </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 sm:p-4 text-center">
-            <span className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Dentro</span>
-            <span className="text-2xl sm:text-3xl font-black text-yellow-400">
-              {adminStats?.currently_inside || 0}
-            </span>
-          </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-3 sm:p-4 text-center">
-            <span className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 block">Total</span>
-            <span className="text-2xl sm:text-3xl font-black text-white">
-              {queueInfo?.totalToday || 0}
-            </span>
-          </div>
+      <main className="max-w-4xl mx-auto w-full px-4 py-6 space-y-5 pb-20">
+
+        {/* Stats Cards Principais */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px" style={{ background: 'var(--gray-5)' }}>
+          {[
+            { label: 'Chamando', value: `#${queueInfo?.currentNumber || 0}`, color: 'var(--gov-green)' },
+            { label: 'Na Fila',  value: queueInfo?.totalWaiting || 0,      color: 'var(--gov-blue)' },
+            { label: 'Dentro',   value: adminStats?.currently_inside || 0,  color: 'var(--gov-orange)' },
+            { label: 'Total Hoje', value: queueInfo?.totalToday || 0,       color: 'var(--gray-90)' },
+          ].map((s, i) => (
+            <div key={i} className="bg-white p-4 text-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: 'var(--gray-40)' }}>{s.label}</span>
+              <span className="text-2xl sm:text-3xl font-black tabular-nums" style={{ color: s.color, fontFamily: 'var(--font-primary)' }}>{s.value}</span>
+            </div>
+          ))}
         </div>
 
         {/* Extra Stats */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-2 sm:p-3 flex flex-col sm:flex-row items-center gap-1 sm:gap-3">
-            <div className="p-1.5 sm:p-2 bg-orange-500/20 rounded-lg">
-              <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />
+        <div className="grid grid-cols-3 gap-px" style={{ background: 'var(--gray-5)' }}>
+          {[
+            { icon: <Clock className="w-4 h-4" />, value: `${adminStats?.avg_duration_minutes || 0}m`, label: 'Tempo Médio', color: 'var(--gov-orange)' },
+            { icon: <UserX className="w-4 h-4" />,  value: adminStats?.skipped_count || 0,           label: 'Pulados',      color: 'var(--gov-red)' },
+            { icon: <BarChart3 className="w-4 h-4" />, value: queueInfo?.maxTickets || 200,           label: 'Cota Diária',  color: 'var(--gov-blue)' },
+          ].map((s, i) => (
+            <div key={i} className="bg-white p-3 flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
+              <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0" style={{ background: s.color, opacity: 1, color: '#fff' }}>
+                {s.icon}
+              </div>
+              <div className="text-center sm:text-left">
+                <span className="text-base sm:text-lg font-black" style={{ color: 'var(--gray-90)', fontFamily: 'var(--font-primary)' }}>{s.value}</span>
+                <span className="block text-[10px] sm:text-xs font-medium" style={{ color: 'var(--gray-40)' }}>{s.label}</span>
+              </div>
             </div>
-            <div className="text-center sm:text-left">
-              <span className="text-sm sm:text-lg font-bold text-white">{adminStats?.avg_duration_minutes || 0}m</span>
-              <span className="block text-[10px] sm:text-xs text-gray-400">Tempo Médio</span>
-            </div>
-          </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-2 sm:p-3 flex flex-col sm:flex-row items-center gap-1 sm:gap-3">
-            <div className="p-1.5 sm:p-2 bg-red-500/20 rounded-lg">
-              <UserX className="w-4 h-4 sm:w-5 sm:h-5 text-red-400" />
-            </div>
-            <div className="text-center sm:text-left">
-              <span className="text-sm sm:text-lg font-bold text-white">{adminStats?.skipped_count || 0}</span>
-              <span className="block text-[10px] sm:text-xs text-gray-400">Pulados</span>
-            </div>
-          </div>
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-2 sm:p-3 flex flex-col sm:flex-row items-center gap-1 sm:gap-3">
-            <div className="p-1.5 sm:p-2 bg-green-500/20 rounded-lg">
-              <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />
-            </div>
-            <div className="text-center sm:text-left">
-              <span className="text-sm sm:text-lg font-bold text-white">{queueInfo?.maxTickets || 200}</span>
-              <span className="block text-[10px] sm:text-xs text-gray-400">Cota</span>
-            </div>
-          </div>
+          ))}
         </div>
 
-        {/* Tabs */}
-        <div className="flex bg-gray-800 rounded-xl p-1 border border-gray-700">
-          <button
-            onClick={() => setActiveTab('scanner')}
-            className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all ${
-              activeTab === 'scanner' 
-                ? 'bg-green-600 text-white shadow-lg' 
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <ScanLine className="w-4 h-4" />
-            <span className="hidden sm:inline">Scanner</span> QR
-          </button>
-          <button
-            onClick={() => setActiveTab('queue')}
-            className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all ${
-              activeTab === 'queue' 
-                ? 'bg-green-600 text-white shadow-lg' 
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            Fila ({waitingTickets.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('stats')}
-            className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all ${
-              activeTab === 'stats' 
-                ? 'bg-green-600 text-white shadow-lg' 
-                : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            <span className="hidden sm:inline">Relatório</span><span className="sm:hidden">Stats</span>
-          </button>
+        {/* Tabs — estilo GOV.BR */}
+        <div className="gov-card flex overflow-hidden" style={{ borderBottom: '2px solid var(--gray-5)' }}>
+          {[
+            { key: 'scanner', icon: <ScanLine className="w-4 h-4" />, label: 'Scanner QR',         shortLabel: 'QR',    activeColor: 'var(--gov-blue)' },
+            { key: 'queue',   icon: <Users className="w-4 h-4" />,    label: `Fila (${waitingTickets.length})`, shortLabel: 'Fila',  activeColor: 'var(--gov-blue)' },
+            { key: 'stats',   icon: <BarChart3 className="w-4 h-4" />,label: 'Relatório',           shortLabel: 'Stats', activeColor: 'var(--gov-blue)' },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key as typeof activeTab)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-3.5 text-xs sm:text-sm font-bold transition-all relative"
+              style={{
+                color: activeTab === tab.key ? tab.activeColor : 'var(--gray-40)',
+                background: activeTab === tab.key ? '#E8F0FE' : 'transparent',
+                borderBottom: activeTab === tab.key ? `3px solid ${tab.activeColor}` : '3px solid transparent',
+              }}
+            >
+              {tab.icon}
+              <span className="hidden sm:inline">{tab.label}</span>
+              <span className="sm:hidden">{tab.shortLabel}</span>
+            </button>
+          ))}
           {isSuperAdmin && (
             <button
               onClick={() => { setActiveTab('admins'); fetchAdminList(); }}
-              className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-3 rounded-lg text-xs sm:text-sm font-bold transition-all ${
-                activeTab === 'admins' 
-                  ? 'bg-amber-600 text-white shadow-lg' 
-                  : 'text-gray-400 hover:text-white'
-              }`}
+              className="flex-1 flex items-center justify-center gap-1.5 py-3 sm:py-3.5 text-xs sm:text-sm font-bold transition-all"
+              style={{
+                color: activeTab === 'admins' ? 'var(--gov-yellow)' : 'var(--gray-40)',
+                background: activeTab === 'admins' ? 'var(--gov-blue-dark)' : 'transparent',
+                borderBottom: activeTab === 'admins' ? '3px solid var(--gov-yellow)' : '3px solid transparent',
+              }}
             >
               <Shield className="w-4 h-4" />
-              Admins
+              <span className="hidden sm:inline">Equipe</span>
+              <span className="sm:hidden">Adm</span>
             </button>
           )}
         </div>
 
         {/* Tab Content */}
         {activeTab === 'scanner' && (
-          <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-            <button 
+          <div className="gov-card overflow-hidden">
+            <button
               onClick={() => setShowScanner(!showScanner)}
-              className="w-full flex items-center justify-between p-4 text-white hover:bg-gray-700 transition-colors"
+              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+              style={{ borderBottom: showScanner ? '1px solid var(--gray-5)' : 'none' }}
             >
-              <span className="flex items-center gap-2 font-bold">
-                <QrCode className="w-5 h-5 text-green-400" />
-                Câmera de Leitura
+              <span className="flex items-center gap-3 font-bold" style={{ color: 'var(--gray-90)' }}>
+                <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: 'var(--gov-blue)' }}>
+                  <QrCode className="w-4 h-4 text-white" />
+                </div>
+                Câmera de Leitura QR
               </span>
-              {showScanner ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              {showScanner ? <ChevronUp className="w-5 h-5" style={{ color: 'var(--gray-40)' }} /> : <ChevronDown className="w-5 h-5" style={{ color: 'var(--gray-40)' }} />}
             </button>
             {showScanner && (
-              <div className="p-4 pt-0">
-                <div className="bg-black rounded-lg p-4">
-                  <p className="text-center text-gray-400 text-sm mb-3 flex items-center justify-center gap-2">
+              <div className="p-4">
+                <div className="rounded overflow-hidden" style={{ background: '#000' }}>
+                  <p className="text-center text-white/60 text-sm py-3 flex items-center justify-center gap-2">
                     <ScanLine className="w-4 h-4" /> Aponte a câmera para o QR Code do aluno
                   </p>
-                  <div id="reader" className="w-full bg-black rounded-lg overflow-hidden"></div>
+                  <div id="reader" className="w-full bg-black rounded overflow-hidden"></div>
                 </div>
               </div>
             )}
@@ -478,37 +499,36 @@ export default function AdminPage() {
         )}
 
         {activeTab === 'queue' && (
-          <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-            <div className="p-4 border-b border-gray-700">
-              <h3 className="text-white font-bold flex items-center gap-2">
-                <ArrowRight className="w-5 h-5 text-yellow-400" />
+          <div className="gov-card overflow-hidden">
+            <div className="px-5 py-4" style={{ borderBottom: '2px solid var(--gray-5)' }}>
+              <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--gray-90)' }}>
+                <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: 'var(--gov-orange)' }}>
+                  <ArrowRight className="w-4 h-4 text-white" />
+                </div>
                 Fila de Espera — {waitingTickets.length} pessoa{waitingTickets.length !== 1 ? 's' : ''}
               </h3>
-              <p className="text-gray-400 text-sm mt-1">
+              <p className="text-sm mt-1" style={{ color: 'var(--gray-40)' }}>
                 Clique em &quot;Pular&quot; para reenviar um aluno ao final da fila
               </p>
             </div>
-            <div className="divide-y divide-gray-700 max-h-[60vh] overflow-y-auto">
+            <div className="divide-y max-h-[60vh] overflow-y-auto" style={{ borderColor: 'var(--gray-5)' }}>
               {waitingTickets.length > 0 ? (
                 waitingTickets.map((ticket, index) => {
                   const isPast = ticket.queue_number <= (queueInfo?.currentNumber || 0)
                   return (
-                    <div 
+                    <div
                       key={ticket.id}
-                      className={`flex items-center justify-between gap-2 p-3 sm:p-4 ${
-                        isPast ? 'bg-red-900/20' : index === 0 ? 'bg-yellow-900/20' : ''
-                      }`}
+                      className="flex items-center justify-between gap-2 px-5 py-3"
+                      style={{ background: isPast ? 'var(--gov-red-light)' : index === 0 ? '#FFFBE6' : '#fff' }}
                     >
-                      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-                        <span className={`text-lg sm:text-2xl font-black tabular-nums flex-shrink-0 ${
-                          isPast ? 'text-red-400' : index === 0 ? 'text-yellow-400' : 'text-gray-300'
-                        }`}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="text-lg sm:text-2xl font-black tabular-nums flex-shrink-0" style={{ color: isPast ? 'var(--gov-red)' : index === 0 ? 'var(--gov-orange)' : 'var(--gray-90)', fontFamily: 'var(--font-primary)' }}>
                           #{ticket.queue_number.toString().padStart(3, '0')}
                         </span>
                         <div className="min-w-0">
-                          <span className="text-white font-medium block text-sm sm:text-base truncate">{ticket.student_name}</span>
+                          <span className="font-semibold block text-sm truncate" style={{ color: 'var(--gray-90)' }}>{ticket.student_name}</span>
                           {isPast && (
-                            <span className="text-red-400 text-xs flex items-center gap-1">
+                            <span className="text-xs flex items-center gap-1" style={{ color: 'var(--gov-red)' }}>
                               <AlertTriangle className="w-3 h-3" /> Não compareceu
                             </span>
                           )}
@@ -517,16 +537,17 @@ export default function AdminPage() {
                       <button
                         onClick={() => handleSkipAndRequeue(ticket.id, ticket.student_name)}
                         disabled={loadingAction === ticket.id}
-                        className="flex items-center gap-1 sm:gap-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-600/30 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all disabled:opacity-50 flex-shrink-0"
+                        className="btn-gov-secondary text-xs px-3 py-1.5 flex-shrink-0"
+                        style={{ borderColor: 'var(--gov-red)', color: 'var(--gov-red)', fontSize: '0.75rem' }}
                       >
-                        <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        <SkipForward className="w-3.5 h-3.5" />
                         {loadingAction === ticket.id ? '...' : 'Pular'}
                       </button>
                     </div>
                   )
                 })
               ) : (
-                <div className="p-12 text-center text-gray-500">
+                <div className="p-12 text-center" style={{ color: 'var(--gray-20)' }}>
                   <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
                   <p className="font-medium">Nenhuma pessoa na fila</p>
                 </div>
@@ -537,137 +558,136 @@ export default function AdminPage() {
 
         {activeTab === 'stats' && (
           <div className="space-y-4">
-            <div className="bg-gray-800 rounded-xl border border-gray-700 p-6">
-              <h3 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-green-400" />
-                Relatório do Dia
-              </h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <div className="bg-gray-700/50 rounded-xl p-3 sm:p-4">
-                  <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                    <div className="p-1.5 sm:p-2 bg-green-500/20 rounded-lg">
-                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />
-                    </div>
-                    <span className="text-gray-300 font-medium text-sm sm:text-base">Fichas Emitidas</span>
+            <div className="gov-card overflow-hidden">
+              <div className="px-5 py-4" style={{ borderBottom: '2px solid var(--gray-5)' }}>
+                <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--gray-90)' }}>
+                  <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: 'var(--gov-blue)' }}>
+                    <BarChart3 className="w-4 h-4 text-white" />
                   </div>
-                  <span className="text-3xl sm:text-4xl font-black text-white">{queueInfo?.totalToday || 0}</span>
-                  <div className="mt-2 bg-gray-600/50 rounded-full h-2">
-                    <div 
-                      className="bg-green-500 h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(100, ((queueInfo?.totalToday || 0) / (queueInfo?.maxTickets || 200)) * 100)}%` }}
-                    ></div>
+                  Relatório do Dia
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-px" style={{ background: 'var(--gray-5)' }}>
+                <div className="bg-white p-5">
+                  <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--gray-40)' }}>Fichas Emitidas</p>
+                  <p className="text-4xl font-black tabular-nums mb-2" style={{ color: 'var(--gray-90)', fontFamily: 'var(--font-primary)' }}>{queueInfo?.totalToday || 0}</p>
+                  <div className="rounded-full h-2 overflow-hidden" style={{ background: 'var(--gray-5)' }}>
+                    <div
+                      className="h-2 rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(100, ((queueInfo?.totalToday || 0) / (queueInfo?.maxTickets || 200)) * 100)}%`, background: 'var(--gov-blue)' }}
+                    />
                   </div>
-                  <span className="text-xs text-gray-400 mt-1 block">
+                  <span className="text-xs mt-1 block" style={{ color: 'var(--gray-40)' }}>
                     {queueInfo?.totalToday || 0} / {queueInfo?.maxTickets || 200} cota diária
                   </span>
                 </div>
-
-                <div className="bg-gray-700/50 rounded-xl p-3 sm:p-4">
-                  <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                    <div className="p-1.5 sm:p-2 bg-blue-500/20 rounded-lg">
-                      <Users className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
-                    </div>
-                    <span className="text-gray-300 font-medium text-sm sm:text-base">Atendidos</span>
-                  </div>
-                  <span className="text-3xl sm:text-4xl font-black text-white">
+                <div className="bg-white p-5">
+                  <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--gray-40)' }}>Atendidos</p>
+                  <p className="text-4xl font-black tabular-nums" style={{ color: 'var(--gov-green)', fontFamily: 'var(--font-primary)' }}>
                     {(queueInfo?.totalToday || 0) - (queueInfo?.totalWaiting || 0)}
-                  </span>
-                  <span className="text-gray-400 text-sm ml-2">
-                    de {queueInfo?.totalToday || 0}
-                  </span>
+                  </p>
+                  <span className="text-sm" style={{ color: 'var(--gray-40)' }}>de {queueInfo?.totalToday || 0} fichas</span>
                 </div>
-
-                <div className="bg-gray-700/50 rounded-xl p-3 sm:p-4">
-                  <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                    <div className="p-1.5 sm:p-2 bg-orange-500/20 rounded-lg">
-                      <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />
-                    </div>
-                    <span className="text-gray-300 font-medium text-sm sm:text-base">Tempo Médio</span>
-                  </div>
-                  <span className="text-3xl sm:text-4xl font-black text-white">
+                <div className="bg-white p-5">
+                  <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--gray-40)' }}>Tempo Médio</p>
+                  <p className="text-4xl font-black tabular-nums" style={{ color: 'var(--gov-orange)', fontFamily: 'var(--font-primary)' }}>
                     {adminStats?.avg_duration_minutes || '—'}
-                  </span>
-                  <span className="text-gray-400 text-sm ml-2">min</span>
+                  </p>
+                  <span className="text-sm" style={{ color: 'var(--gray-40)' }}>minutos na fila</span>
                 </div>
-
-                <div className="bg-gray-700/50 rounded-xl p-3 sm:p-4">
-                  <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                    <div className="p-1.5 sm:p-2 bg-yellow-500/20 rounded-lg">
-                      <DoorOpen className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400" />
-                    </div>
-                    <span className="text-gray-300 font-medium text-sm sm:text-base">No Refeitório</span>
-                  </div>
-                  <span className="text-3xl sm:text-4xl font-black text-white">
+                <div className="bg-white p-5">
+                  <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--gray-40)' }}>No Refeitório</p>
+                  <p className="text-4xl font-black tabular-nums" style={{ color: 'var(--gov-blue)', fontFamily: 'var(--font-primary)' }}>
                     {adminStats?.currently_inside || 0}
-                  </span>
-                  <span className="text-gray-400 text-sm ml-2">pessoas</span>
+                  </p>
+                  <span className="text-sm" style={{ color: 'var(--gray-40)' }}>pessoas agora</span>
                 </div>
               </div>
             </div>
 
-            <div className="bg-gray-800 rounded-xl border border-gray-700 p-6">
-              <h3 className="text-white font-bold text-lg mb-3 flex items-center gap-2">
-                <UserX className="w-5 h-5 text-red-400" />
-                Não Comparecimentos
-              </h3>
-              <div className="flex items-center gap-4">
-                <span className="text-5xl font-black text-red-400">{adminStats?.skipped_count || 0}</span>
+            <div className="gov-card p-5" style={{ borderLeft: '4px solid var(--gov-red)' }}>
+              <div className="flex items-start gap-4">
                 <div>
-                  <p className="text-gray-300 font-medium">alunos foram reenviados ao final da fila</p>
-                  <p className="text-gray-500 text-sm mt-1">
-                    Porcentagem: {queueInfo?.totalToday ? ((adminStats?.skipped_count || 0) / queueInfo.totalToday * 100).toFixed(1) : '0'}%
+                  <p className="text-4xl font-black tabular-nums" style={{ color: 'var(--gov-red)', fontFamily: 'var(--font-primary)' }}>{adminStats?.skipped_count || 0}</p>
+                  <p className="font-semibold text-sm mt-1" style={{ color: 'var(--gray-90)' }}>não comparecimentos</p>
+                  <p className="text-xs" style={{ color: 'var(--gray-40)' }}>
+                    {queueInfo?.totalToday ? ((adminStats?.skipped_count || 0) / queueInfo.totalToday * 100).toFixed(1) : '0'}% do total
                   </p>
                 </div>
+              </div>
+              <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--gray-5)' }}>
+                <p className="text-xs mb-3" style={{ color: 'var(--gray-40)' }}>
+                  No fim do dia, processe as faltas para advertir os alunos que não cancelaram a reserva e não compareceram.
+                </p>
+                <button
+                  onClick={handleProcessNoShows}
+                  disabled={processingNoShows}
+                  className="btn-gov-primary w-full"
+                  style={{ background: 'var(--gov-red)', fontSize: '0.875rem' }}
+                >
+                  {processingNoShows ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                  Processar Faltas (Ontem) e Aplicar Bloqueios
+                </button>
               </div>
             </div>
           </div>
         )}
 
         {activeTab === 'admins' && isSuperAdmin && (
+
           <div className="space-y-4 animate-fade-in">
-            {/* Add Admin Form */}
-            <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-              <div className="p-4 border-b border-gray-700">
-                <h3 className="text-white font-bold flex items-center gap-2">
-                  <UserPlus className="w-5 h-5 text-amber-400" />
-                  Adicionar Administrador
+            <div className="gov-card overflow-hidden">
+              <div className="px-5 py-4" style={{ borderBottom: '2px solid var(--gray-5)' }}>
+                <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--gray-90)' }}>
+                  <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: '#866800' }}>
+                    <UserPlus className="w-4 h-4 text-white" />
+                  </div>
+                  Adicionar Membro da Equipe
                 </h3>
-                <p className="text-gray-400 text-sm mt-1">
-                  Apenas emails institucionais IFPE ({adminList.length}/50 admins)
+                <p className="text-sm mt-1" style={{ color: 'var(--gray-40)' }}>
+                  Apenas emails institucionais IFPE ({adminList.length}/50)
                 </p>
               </div>
-              <div className="p-4 space-y-3">
-                <div className="flex gap-2">
+              <div className="p-5 space-y-3">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <div className="relative flex-1">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--gray-20)' }} />
                     <input
                       type="email"
                       value={newAdminEmail}
                       onChange={(e) => { setNewAdminEmail(e.target.value); setAdminError(''); setAdminSuccess(''); }}
                       onKeyDown={(e) => e.key === 'Enter' && handleAddAdmin()}
                       placeholder="email@discente.ifpe.edu.br"
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg pl-10 pr-4 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-colors"
+                      className="gov-input pl-10"
                     />
                   </div>
+                  <select
+                    value={newAdminRole}
+                    onChange={(e) => setNewAdminRole(e.target.value)}
+                    className="gov-input"
+                    style={{ width: 'auto' }}
+                  >
+                    <option value="admin">Administrador</option>
+                    <option value="nutricionista">Nutricionista</option>
+                  </select>
                   <button
                     onClick={handleAddAdmin}
                     disabled={adminActionLoading}
-                    className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 disabled:bg-amber-600/50 text-white px-4 py-2.5 rounded-lg text-sm font-bold transition-all disabled:cursor-not-allowed"
+                    className="btn-gov-primary"
+                    style={{ background: '#866800', whiteSpace: 'nowrap' }}
                   >
                     {adminActionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
                     <span className="hidden sm:inline">Adicionar</span>
                   </button>
                 </div>
-
                 {adminError && (
-                  <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 text-red-400 rounded-lg px-3 py-2 text-sm animate-slide-up">
+                  <div className="flex items-center gap-2 p-3 rounded text-sm" style={{ background: 'var(--gov-red-light)', color: 'var(--gov-red)', border: '1px solid #f4a9a1' }}>
                     <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                     {adminError}
                   </div>
                 )}
                 {adminSuccess && (
-                  <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 text-green-400 rounded-lg px-3 py-2 text-sm animate-slide-up">
+                  <div className="flex items-center gap-2 p-3 rounded text-sm" style={{ background: 'var(--gov-green-light)', color: 'var(--gov-green)', border: '1px solid #a8dba8' }}>
                     <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                     {adminSuccess}
                   </div>
@@ -675,49 +695,48 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Admin List */}
-            <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-              <div className="p-4 border-b border-gray-700">
-                <h3 className="text-white font-bold flex items-center gap-2">
-                  <Shield className="w-5 h-5 text-amber-400" />
-                  Administradores Cadastrados
-                  <span className="ml-auto text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-full">
-                    {adminList.length}/50
-                  </span>
+            <div className="gov-card overflow-hidden">
+              <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '2px solid var(--gray-5)' }}>
+                <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--gray-90)' }}>
+                  <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: 'var(--gov-blue-dark)' }}>
+                    <Shield className="w-4 h-4 text-white" />
+                  </div>
+                  Equipe Cadastrada
                 </h3>
+                <span className="text-xs font-bold px-2 py-1 rounded" style={{ background: 'var(--gray-5)', color: 'var(--gray-40)' }}>
+                  {adminList.length}/50
+                </span>
               </div>
-              <div className="divide-y divide-gray-700 max-h-[60vh] overflow-y-auto">
+              <div className="divide-y max-h-[60vh] overflow-y-auto" style={{ borderColor: 'var(--gray-5)' }}>
                 {adminList.length > 0 ? (
                   adminList.map((admin) => (
-                    <div key={admin.id} className="flex items-center justify-between gap-2 p-3 sm:p-4 hover:bg-gray-700/30 transition-colors">
+                    <div key={admin.id} className="flex items-center justify-between gap-2 px-5 py-3 hover:bg-gray-50 transition-colors">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`p-2 rounded-full flex-shrink-0 ${
-                          admin.is_super_admin 
-                            ? 'bg-amber-500/20' 
-                            : 'bg-blue-500/20'
-                        }`}>
-                          {admin.is_super_admin 
-                            ? <Crown className="w-4 h-4 text-amber-400" />
-                            : <Users className="w-4 h-4 text-blue-400" />
-                          }
+                        <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: admin.is_super_admin ? '#866800' : admin.role === 'nutricionista' ? 'var(--gov-green)' : 'var(--gov-blue)', opacity: 0.15 }}></div>
+                        <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 absolute" style={{ position: 'relative', background: admin.is_super_admin ? '#FFFBE6' : admin.role === 'nutricionista' ? 'var(--gov-green-light)' : '#E8F0FE', marginLeft: '-2.25rem' }}>
+                          {admin.is_super_admin ? <Crown className="w-4 h-4" style={{ color: '#866800' }} /> : <Users className="w-4 h-4" style={{ color: admin.role === 'nutricionista' ? 'var(--gov-green)' : 'var(--gov-blue)' }} />}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 ml-2">
                           <div className="flex items-center gap-2">
-                            <span className="text-white font-medium text-sm truncate">{admin.full_name}</span>
+                            <span className="font-semibold text-sm truncate" style={{ color: 'var(--gray-90)' }}>{admin.full_name}</span>
                             {admin.is_super_admin && (
-                              <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold flex-shrink-0">
-                                SUPER
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: '#FFFBE6', color: '#866800' }}>SUPER</span>
+                            )}
+                            {!admin.is_super_admin && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: admin.role === 'nutricionista' ? 'var(--gov-green-light)' : '#E8F0FE', color: admin.role === 'nutricionista' ? 'var(--gov-green)' : 'var(--gov-blue)' }}>
+                                {admin.role === 'nutricionista' ? 'NUTRI' : 'ADMIN'}
                               </span>
                             )}
                           </div>
-                          <span className="text-gray-400 text-xs truncate block">{admin.email}</span>
+                          <span className="text-xs truncate block" style={{ color: 'var(--gray-40)' }}>{admin.email}</span>
                         </div>
                       </div>
                       {!admin.is_super_admin && (
                         <button
                           onClick={() => handleRemoveAdmin(admin.email)}
                           disabled={adminActionLoading}
-                          className="flex items-center gap-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-600/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 flex-shrink-0"
+                          className="btn-gov-secondary text-xs px-3 py-1.5 flex-shrink-0"
+                          style={{ borderColor: 'var(--gov-red)', color: 'var(--gov-red)', fontSize: '0.75rem' }}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span className="hidden sm:inline">Remover</span>
@@ -726,7 +745,7 @@ export default function AdminPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="p-12 text-center text-gray-500">
+                  <div className="p-12 text-center" style={{ color: 'var(--gray-20)' }}>
                     <Shield className="w-12 h-12 mx-auto mb-3 opacity-30" />
                     <p className="font-medium">Nenhum administrador cadastrado</p>
                   </div>
@@ -738,12 +757,22 @@ export default function AdminPage() {
 
       </main>
 
-      <ValidationFeedback 
-        type={feedback.type} 
-        title={feedback.title} 
-        message={feedback.message} 
-        onClose={handleCloseFeedback} 
+      <footer style={{ background: 'var(--gov-blue-dark)', borderTop: '3px solid var(--gov-yellow)' }} className="py-6 px-4 flex flex-col items-center mt-8">
+        <p className="text-white/50 text-xs mb-3 font-medium tracking-wide">IFPE Belo Jardim · Painel Administrativo</p>
+        <div className="inline-flex items-center gap-2 bg-white/5 px-4 py-2 rounded-full border border-white/10">
+          <span className="text-xs font-medium text-white/60 uppercase tracking-widest">Desenvolvido por</span>
+          <div className="w-1 h-1 rounded-full bg-yellow-400"></div>
+          <span className="text-sm font-bold text-white/90">Pedro Victor & Pedro Borges</span>
+        </div>
+      </footer>
+
+      <ValidationFeedback
+        type={feedback.type}
+        title={feedback.title}
+        message={feedback.message}
+        onClose={handleCloseFeedback}
       />
     </div>
   )
 }
+

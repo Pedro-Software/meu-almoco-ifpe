@@ -2,7 +2,7 @@
 
 import { QRCodeSVG } from 'qrcode.react'
 import { useState, useEffect } from 'react'
-import { ShieldAlert, RefreshCw } from 'lucide-react'
+import { ShieldAlert, RefreshCw, Hash } from 'lucide-react'
 
 interface QRCodeDisplayProps {
   qrToken: string
@@ -10,15 +10,11 @@ interface QRCodeDisplayProps {
 }
 
 export function QRCodeDisplay({ qrToken, queueNumber }: QRCodeDisplayProps) {
-  const [timeLeft, setTimeLeft] = useState(300) // 5 minutos = 300 segundos
+  const [timeLeft, setTimeLeft] = useState(300)
 
   useEffect(() => {
     if (timeLeft <= 0) return
-
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => prev - 1)
-    }, 1000)
-
+    const interval = setInterval(() => setTimeLeft((prev) => prev - 1), 1000)
     return () => clearInterval(interval)
   }, [timeLeft])
 
@@ -29,49 +25,83 @@ export function QRCodeDisplay({ qrToken, queueNumber }: QRCodeDisplayProps) {
   }
 
   const isExpired = timeLeft <= 0
+  const progress = Math.max(0, (timeLeft / 300) * 100)
+  const progressColor = timeLeft > 120 ? 'var(--gov-blue)' : timeLeft > 60 ? 'var(--gov-orange)' : 'var(--gov-red)'
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 flex flex-col items-center text-center">
-      <h2 className="text-xl font-bold text-gray-800 mb-2">Sua Ficha</h2>
-      <p className="text-gray-500 text-sm mb-6">Apresente este QR Code no refeitório</p>
+    <div className="gov-card overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 flex items-center gap-3" style={{ borderBottom: '2px solid var(--gray-5)', background: 'var(--gov-blue-dark)' }}>
+        <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0" style={{ background: 'var(--gov-yellow)' }}>
+          <Hash className="w-4 h-4" style={{ color: 'var(--gov-blue-dark)' }} />
+        </div>
+        <div>
+          <h2 className="text-white font-bold text-base">Sua Ficha de Almoço</h2>
+          <p className="text-white/50 text-xs">Apresente este QR Code no refeitório</p>
+        </div>
+      </div>
 
-      <div className={`relative p-4 rounded-xl ${isExpired ? 'bg-red-50' : 'bg-gray-50'}`}>
-        {!isExpired ? (
-          <QRCodeSVG 
-            value={qrToken} 
-            size={200}
-            level="H"
-            includeMargin={true}
-            className="rounded-lg shadow-sm"
-          />
-        ) : (
-          <div className="w-[200px] h-[200px] flex flex-col items-center justify-center text-red-500">
-            <ShieldAlert className="w-16 h-16 mb-2" />
-            <span className="font-medium text-sm">QR Code Expirado</span>
-            <span className="text-xs text-red-400 text-center mt-2 px-4">
-              Por segurança, o código expira após 5 minutos.
-            </span>
+      <div className="p-6 flex flex-col items-center">
+
+        {/* Número da fila em destaque */}
+        <div className="mb-5 text-center">
+          <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--gray-40)' }}>Número na Fila</p>
+          <div
+            className="text-6xl font-black tabular-nums"
+            style={{ color: 'var(--gov-blue)', fontFamily: 'var(--font-primary)', lineHeight: 1 }}
+          >
+            #{queueNumber.toString().padStart(3, '0')}
           </div>
+        </div>
+
+        {/* QR Code */}
+        <div
+          className="p-4 rounded mb-4"
+          style={{ background: isExpired ? 'var(--gov-red-light)' : 'var(--gray-2)', border: `2px solid ${isExpired ? '#f4a9a1' : 'var(--gray-5)'}` }}
+        >
+          {!isExpired ? (
+            <QRCodeSVG
+              value={qrToken}
+              size={180}
+              level="H"
+              includeMargin={true}
+              className="rounded"
+            />
+          ) : (
+            <div className="w-[180px] h-[180px] flex flex-col items-center justify-center" style={{ color: 'var(--gov-red)' }}>
+              <ShieldAlert className="w-14 h-14 mb-3" />
+              <span className="font-bold text-sm text-center">QR Code Expirado</span>
+              <span className="text-xs text-center mt-1 px-4 opacity-70">Por segurança, o código expira após 5 minutos.</span>
+            </div>
+          )}
+        </div>
+
+        {/* Timer */}
+        {!isExpired ? (
+          <div className="w-full">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: progressColor }}>
+                <RefreshCw className="w-3 h-3 animate-spin-slow" />
+                Válido por {formatTime(timeLeft)}
+              </span>
+              <span className="text-xs font-bold" style={{ color: progressColor }}>{Math.round(progress)}%</span>
+            </div>
+            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--gray-5)' }}>
+              <div
+                className="h-2 rounded-full transition-all duration-1000"
+                style={{ width: `${progress}%`, background: progressColor }}
+              />
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => window.location.reload()}
+            className="btn-gov-primary mt-2"
+          >
+            Atualizar Página
+          </button>
         )}
       </div>
-
-      <div className="mt-8 font-mono text-3xl font-black text-[#00913f] tracking-tighter">
-        #{queueNumber.toString().padStart(3, '0')}
-      </div>
-
-      {!isExpired ? (
-        <div className="mt-6 flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-4 py-2 rounded-full">
-          <RefreshCw className="w-4 h-4 animate-spin-slow" />
-          <span>Válido por {formatTime(timeLeft)}</span>
-        </div>
-      ) : (
-        <button 
-          onClick={() => window.location.reload()}
-          className="mt-6 bg-gray-800 text-white px-6 py-2.5 rounded-full text-sm font-medium hover:bg-gray-700 transition"
-        >
-          Atualizar Página
-        </button>
-      )}
     </div>
   )
 }

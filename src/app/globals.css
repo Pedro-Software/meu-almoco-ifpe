@@ -1,72 +1,250 @@
+@import url('https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap');
 @import "tailwindcss";
 
+/* ============================================
+   DESIGN SYSTEM GOV.BR — MEU ALMOÇO IFPE
+   ============================================ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Cores Primárias GOV.BR */
+  --gov-blue-dark:  #071D41;
+  --gov-blue:       #1351B4;
+  --gov-blue-warm:  #155BCB;
+  --gov-blue-light: #2670E8;
+  --gov-yellow:     #FFCD07;
+
+  /* Cores de Status */
+  --gov-green:      #168821;
+  --gov-green-light:#E3F5E1;
+  --gov-red:        #E52207;
+  --gov-red-light:  #FDE8E5;
+  --gov-orange:     #E77D00;
+  --gov-orange-light:#FFF5E5;
+
+  /* Neutros */
+  --gray-2:  #F8F8F8;
+  --gray-5:  #EDEDED;
+  --gray-10: #CCCCCC;
+  --gray-20: #9E9D9D;
+  --gray-40: #636363;
+  --gray-60: #454545;
+  --gray-80: #333333;
+  --gray-90: #1B1B1B;
+
+  /* Tipografia */
+  --font-primary: 'Raleway', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* Background padrão */
+  --background: #F8F8F8;
+  --foreground: #1B1B1B;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ============================================
+   BASE
+   ============================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-primary);
+  line-height: 1.5;
+  margin: 0;
 }
 
-/* Animações customizadas */
+/* ============================================
+   FOCO ACESSÍVEL (GOV.BR)
+   ============================================ */
+
+:focus-visible {
+  outline: 3px solid var(--gov-yellow);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ============================================
+   ANIMAÇÕES
+   ============================================ */
+
 @keyframes wiggle {
   0%, 100% { transform: rotate(-3deg); }
-  50% { transform: rotate(3deg); }
+  50%       { transform: rotate(3deg); }
 }
 
 @keyframes slideUp {
   from { transform: translateY(100%); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
 
 @keyframes fadeIn {
   from { opacity: 0; }
-  to { opacity: 1; }
+  to   { opacity: 1; }
 }
 
-.animate-wiggle {
-  animation: wiggle 0.5s ease-in-out infinite;
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
 }
 
-.animate-slide-up {
-  animation: slideUp 0.3s ease-out;
+.animate-wiggle      { animation: wiggle 0.5s ease-in-out infinite; }
+.animate-slide-up    { animation: slideUp 0.3s ease-out; }
+.animate-fade-in     { animation: fadeIn 0.3s ease-out; }
+.animate-fade-in-up  { animation: fadeInUp 0.35s ease-out; }
+.animate-pulse-slow  { animation: pulse-slow 3s ease-in-out infinite; }
+.animate-spin-slow   { animation: spin 3s linear infinite; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-out;
-}
+/* ============================================
+   SCROLLBAR SUTIL
+   ============================================ */
 
-/* Scrollbar estilizada para o painel admin */
 .overflow-y-auto::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
-
 .overflow-y-auto::-webkit-scrollbar-track {
   background: transparent;
 }
-
 .overflow-y-auto::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 3px;
+  background: var(--gray-10);
+  border-radius: 2px;
+}
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-20);
 }
 
-.overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+/* Scrollbar dark (admin / nutricionista) */
+.dark-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
 }
+.dark-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+/* ============================================
+   COMPONENTES GOV.BR REUTILIZÁVEIS
+   ============================================ */
+
+/* Faixa de header GOV.BR */
+.gov-header-bar {
+  background: var(--gov-blue-dark);
+  color: #fff;
+  font-family: var(--font-primary);
+}
+
+/* Botão Primário */
+.btn-gov-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--gov-blue);
+  color: #fff;
+  font-family: var(--font-primary);
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  text-decoration: none;
+  line-height: 1.4;
+}
+.btn-gov-primary:hover  { background: var(--gov-blue-light); }
+.btn-gov-primary:active { background: var(--gov-blue-dark); }
+.btn-gov-primary:disabled { background: var(--gray-10); color: var(--gray-40); cursor: not-allowed; }
+.btn-gov-primary:focus-visible { outline: 3px solid var(--gov-yellow); outline-offset: 2px; }
+
+/* Botão Secundário */
+.btn-gov-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: transparent;
+  color: var(--gov-blue);
+  font-family: var(--font-primary);
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0.75rem 1.5rem;
+  border: 2px solid var(--gov-blue);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-decoration: none;
+  line-height: 1.4;
+}
+.btn-gov-secondary:hover  { background: rgba(19,81,180,0.08); }
+.btn-gov-secondary:active { background: rgba(19,81,180,0.15); }
+
+/* Card GOV.BR */
+.gov-card {
+  background: #fff;
+  border: 1px solid var(--gray-5);
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+/* Input GOV.BR */
+.gov-input {
+  display: block;
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--gray-20);
+  border-radius: 4px;
+  padding: 0.625rem 0.875rem;
+  font-family: var(--font-primary);
+  font-size: 1rem;
+  color: var(--gray-90);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  outline: none;
+}
+.gov-input:focus {
+  border-color: var(--gov-blue);
+  box-shadow: 0 0 0 3px rgba(19,81,180,0.15);
+}
+.gov-input:disabled {
+  background: var(--gray-2);
+  color: var(--gray-40);
+}
+
+/* Label GOV.BR */
+.gov-label {
+  display: block;
+  font-family: var(--font-primary);
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--gray-80);
+  margin-bottom: 0.375rem;
+}
+
+/* Badge de status */
+.badge-gov-success { background: var(--gov-green-light); color: var(--gov-green); }
+.badge-gov-error   { background: var(--gov-red-light);   color: var(--gov-red);   }
+.badge-gov-warn    { background: var(--gov-orange-light); color: var(--gov-orange); }
+.badge-gov-info    { background: #E8F0FE;                 color: var(--gov-blue);  }

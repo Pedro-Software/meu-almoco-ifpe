@@ -40,7 +40,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Rotas protegidas
-  const protectedRoutes = ['/dashboard', '/admin']
+  const protectedRoutes = ['/dashboard', '/admin', '/nutricionista']
   const isProtectedRoute = protectedRoutes.some((route) =>
     request.nextUrl.pathname.startsWith(route)
   )
@@ -51,17 +51,29 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Proteção admin
-  if (request.nextUrl.pathname.startsWith('/admin') && user) {
+  // Proteção admin e nutricionista
+  if ((request.nextUrl.pathname.startsWith('/admin') || request.nextUrl.pathname.startsWith('/nutricionista')) && user) {
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .single()
 
-    console.log('[Middleware] Admin check:', { user_id: user.id, profile, error })
+    console.log('[Middleware] Role check:', { user_id: user.id, profile, error })
 
-    if (!profile || profile.role !== 'admin') {
+    if (!profile) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/dashboard'
+      return NextResponse.redirect(url)
+    }
+
+    if (request.nextUrl.pathname.startsWith('/admin') && profile.role !== 'admin') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/dashboard'
+      return NextResponse.redirect(url)
+    }
+
+    if (request.nextUrl.pathname.startsWith('/nutricionista') && profile.role !== 'admin' && profile.role !== 'nutricionista') {
       const url = request.nextUrl.clone()
       url.pathname = '/dashboard'
       return NextResponse.redirect(url)
