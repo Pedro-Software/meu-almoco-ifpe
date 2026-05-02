@@ -260,10 +260,10 @@ export default function Dashboard() {
       {/* Footer */}
       <footer style={{ background: 'var(--gov-blue-dark)', borderTop: '3px solid var(--gov-yellow)' }} className="py-6 px-4 flex flex-col items-center mt-8">
         <p className="text-white/50 text-xs mb-3 font-medium tracking-wide">IFPE Belo Jardim · Sistema Institucional</p>
-        <div className="inline-flex items-center gap-2 bg-white/5 px-4 py-2 rounded-full border border-white/10">
-          <span className="text-xs font-medium text-white/60 uppercase tracking-widest">Desenvolvido por</span>
-          <div className="w-1 h-1 rounded-full bg-yellow-400"></div>
-          <span className="text-sm font-bold text-white/90">Pedro Victor & Pedro Borges</span>
+        <div className="inline-flex items-center gap-2 bg-white/5 px-3 sm:px-4 py-2 rounded-full border border-white/10 whitespace-nowrap">
+          <span className="text-[10px] sm:text-xs font-medium text-white/60 uppercase tracking-widest">Desenvolvido por</span>
+          <div className="w-1 h-1 rounded-full bg-yellow-400 flex-shrink-0"></div>
+          <span className="text-xs sm:text-sm font-bold text-white/90">Pedro Victor & Pedro Borges</span>
         </div>
       </footer>
     </div>

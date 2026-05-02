@@ -102,10 +102,10 @@ export default function Login() {
               <span>|</span>
               <span>Instituto Federal de Pernambuco</span>
             </div>
-            <div className="inline-flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full border border-white/20 backdrop-blur-sm shadow-lg w-fit">
-              <span className="text-xs font-medium text-white/80 tracking-wide uppercase">Desenvolvido por</span>
+            <div className="inline-flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full border border-white/20 backdrop-blur-sm shadow-lg w-fit whitespace-nowrap">
+              <span className="text-[10px] sm:text-xs font-medium text-white/80 tracking-wide uppercase">Desenvolvido por</span>
               <div className="w-1 h-1 rounded-full bg-yellow-400"></div>
-              <span className="text-sm font-bold text-white">Pedro Victor & Pedro Borges</span>
+              <span className="text-xs sm:text-sm font-bold text-white">Pedro Victor & Pedro Borges</span>
             </div>
           </div>
         </div>
@@ -259,9 +259,9 @@ export default function Login() {
 
           {/* Assinatura visível apenas no mobile */}
           <div className="md:hidden mt-8 pt-8 text-center flex flex-col items-center">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Desenvolvido por</span>
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full shadow-sm" style={{ background: 'var(--gov-blue-dark)' }}>
-              <div className="w-1 h-1 rounded-full bg-yellow-400"></div>
+            <div className="inline-flex items-center gap-2 bg-[var(--gov-blue-dark)] px-3 py-2 rounded-full shadow-sm whitespace-nowrap">
+              <span className="text-[10px] font-medium text-white/60 uppercase tracking-widest">Desenvolvido por</span>
+              <div className="w-1 h-1 rounded-full bg-yellow-400 flex-shrink-0"></div>
               <span className="text-xs font-bold text-white">Pedro Victor & Pedro Borges</span>
             </div>
           </div>
