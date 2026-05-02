@@ -9,7 +9,8 @@ import {
   LogOut, Users, QrCode, BarChart3, UserX, Clock, 
   CheckCircle2, AlertTriangle, ArrowRight, DoorOpen,
   ScanLine, SkipForward, ChevronDown, ChevronUp,
-  Shield, UserPlus, Trash2, Mail, Crown, Loader2
+  Shield, UserPlus, Trash2, Mail, Crown, Loader2,
+  ArrowLeft
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
@@ -384,14 +385,27 @@ export default function AdminPage() {
               <p className="text-white/50 text-xs hidden sm:block">Meu Almoço IFPE — Gerenciamento</p>
             </div>
           </div>
-          <button
-            onClick={() => supabase.auth.signOut().then(() => router.push('/login'))}
-            className="flex items-center gap-1.5 text-white/70 hover:text-white text-xs font-semibold transition-colors px-3 py-2 rounded"
-            style={{ background: 'rgba(255,255,255,0.1)' }}
-          >
-            <LogOut size={15} />
-            <span className="hidden sm:inline">Sair</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="flex items-center gap-1.5 text-white/70 hover:text-white text-xs font-semibold transition-colors px-3 py-2 rounded"
+              style={{ background: 'rgba(255,255,255,0.1)' }}
+            >
+              <ArrowLeft size={15} />
+              <span className="hidden sm:inline">Dashboard</span>
+            </button>
+            <button
+              onClick={() => {
+                supabase.auth.signOut();
+                router.push('/login');
+              }}
+              className="flex items-center gap-1.5 text-white/70 hover:text-white text-xs font-semibold transition-colors px-3 py-2 rounded"
+              style={{ background: 'rgba(255,255,255,0.1)' }}
+            >
+              <LogOut size={15} />
+              <span className="hidden sm:inline">Sair</span>
+            </button>
+          </div>
         </div>
       </header>
 

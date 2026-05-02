@@ -103,8 +103,8 @@ export default function NutricionistaDashboard() {
     loadData()
   }, [loadData])
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
+  const handleLogout = () => {
+    supabase.auth.signOut()
     router.push('/login')
   }
 

@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Utensils, Users, Clock, CheckCircle2, ArrowRight } from 'lucide-react'
+import { Utensils, Users, Clock, CheckCircle2, ArrowRight, ArrowLeft } from 'lucide-react'
+import Link from 'next/link'
 
 interface PanelInfo {
   current_number: number
@@ -61,9 +62,14 @@ export default function PainelPublico() {
       {/* Header GOV.BR */}
       <header style={{ background: 'var(--gov-blue-dark)', borderBottom: '4px solid var(--gov-yellow)' }} className="px-4 sm:px-8 py-3 sm:py-4 flex justify-between items-center shadow-xl">
         <div className="flex items-center gap-3 sm:gap-5">
-          <div className="w-10 h-10 sm:w-14 sm:h-14 rounded flex items-center justify-center flex-shrink-0" style={{ background: 'var(--gov-blue)' }}>
-            <Utensils className="w-5 h-5 sm:w-8 sm:h-8 text-white" />
-          </div>
+          <Link 
+            href="/" 
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded flex items-center justify-center flex-shrink-0 transition-transform hover:scale-105" 
+            style={{ background: 'var(--gov-blue)' }}
+            title="Voltar para a Página Inicial"
+          >
+            <ArrowLeft className="w-5 h-5 sm:w-8 sm:h-8 text-white" />
+          </Link>
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-white/50 text-xs font-bold tracking-widest hidden sm:inline">GOV.BR</span>
