@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, Utensils, AlertCircle, ArrowLeft, CheckCircle2, Lock } from 'lucide-react'
+import { Loader2, Utensils, AlertCircle, ArrowLeft, CheckCircle2, Lock, Eye, EyeOff } from 'lucide-react'
 
 export default function ResetPassword() {
   const [password, setPassword] = useState('')
@@ -12,6 +12,8 @@ export default function ResetPassword() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
@@ -142,32 +144,52 @@ export default function ResetPassword() {
                   <label htmlFor="new-password" className="block text-sm font-bold mb-2" style={{ color: 'var(--gray-80)' }}>
                     Nova Senha
                   </label>
-                  <input
-                    id="new-password"
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow"
-                    style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
-                    placeholder="Mínimo 6 caracteres"
-                  />
+                  <div className="relative">
+                    <input
+                      id="new-password"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow pr-12"
+                      style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
+                      placeholder="Mínimo 6 caracteres"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-gray-100 transition-colors"
+                      style={{ color: 'var(--gray-40)' }}
+                    >
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label htmlFor="confirm-password" className="block text-sm font-bold mb-2" style={{ color: 'var(--gray-80)' }}>
                     Confirmar Nova Senha
                   </label>
-                  <input
-                    id="confirm-password"
-                    type="password"
-                    required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow"
-                    style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
-                    placeholder="Repita a nova senha"
-                  />
+                  <div className="relative">
+                    <input
+                      id="confirm-password"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow pr-12"
+                      style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
+                      placeholder="Repita a nova senha"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-gray-100 transition-colors"
+                      style={{ color: 'var(--gray-40)' }}
+                    >
+                      {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
                 </div>
 
                 <button

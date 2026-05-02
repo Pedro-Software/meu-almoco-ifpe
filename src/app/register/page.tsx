@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, Utensils, CheckCircle2, ArrowLeft } from 'lucide-react'
+import { Loader2, Utensils, CheckCircle2, ArrowLeft, Eye, EyeOff } from 'lucide-react'
 
 export default function Register() {
   const [email, setEmail] = useState('')
@@ -13,6 +13,7 @@ export default function Register() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
   
   const router = useRouter()
   const supabase = createClient()
@@ -194,17 +195,27 @@ export default function Register() {
               <label htmlFor="reg-senha" className="block text-sm font-bold mb-2" style={{ color: 'var(--gray-80)' }}>
                 Senha (mínimo 6 caracteres)
               </label>
+            <div className="relative">
               <input
                 id="reg-senha"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow"
+                className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow pr-12"
                 style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
                 placeholder="••••••••"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-gray-100 transition-colors"
+                style={{ color: 'var(--gray-40)' }}
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
+            </div>
             </div>
 
             <button

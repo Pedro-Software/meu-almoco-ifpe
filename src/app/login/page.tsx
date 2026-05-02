@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, Utensils, AlertCircle, ArrowLeft, Mail, CheckCircle2 } from 'lucide-react'
+import { Loader2, Utensils, AlertCircle, ArrowLeft, Mail, CheckCircle2, Eye, EyeOff } from 'lucide-react'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -13,6 +13,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [isResetMode, setIsResetMode] = useState(false)
   const [resetSuccess, setResetSuccess] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
@@ -196,16 +197,26 @@ export default function Login() {
                         Esqueci minha senha
                       </button>
                     </div>
-                    <input
-                      id="login-senha"
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow"
-                      style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
-                      placeholder="••••••••"
-                    />
+                    <div className="relative">
+                      <input
+                        id="login-senha"
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full px-4 py-3.5 rounded-lg border focus:ring-2 focus:outline-none transition-shadow pr-12"
+                        style={{ borderColor: 'var(--gray-20)', background: '#fff', color: 'var(--gray-90)' }}
+                        placeholder="••••••••"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-gray-100 transition-colors"
+                        style={{ color: 'var(--gray-40)' }}
+                      >
+                        {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                      </button>
+                    </div>
                   </div>
                 )}
 
