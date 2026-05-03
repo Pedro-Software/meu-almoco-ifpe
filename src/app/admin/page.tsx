@@ -5,8 +5,8 @@ import { Html5QrcodeScanner } from 'html5-qrcode'
 import { useRealtimeQueue } from '@/hooks/useRealtimeQueue'
 import { createClient } from '@/lib/supabase/client'
 import { ValidationFeedback, FeedbackType } from '@/components/ValidationFeedback'
-import { 
-  LogOut, Users, QrCode, BarChart3, UserX, Clock, 
+import {
+  LogOut, Users, QrCode, BarChart3, UserX, Clock,
   CheckCircle2, AlertTriangle, ArrowRight, DoorOpen,
   ScanLine, SkipForward, ChevronDown, ChevronUp,
   Shield, UserPlus, Trash2, Mail, Crown, Loader2,
@@ -249,11 +249,11 @@ export default function AdminPage() {
       const { data, error } = await supabase.rpc('validate_reservation', { p_qr_token: decodedText })
 
       if (error || (data && data.error)) {
-         setFeedback({
-           type: 'error',
-           title: 'Erro de Validação',
-           message: data?.error || error?.message || 'QR Code inválido.'
-         })
+        setFeedback({
+          type: 'error',
+          title: 'Erro de Validação',
+          message: data?.error || error?.message || 'QR Code inválido.'
+        })
       } else if (data) {
         if (data.type === 'error') {
           setFeedback({
@@ -267,7 +267,7 @@ export default function AdminPage() {
             title: 'Sucesso',
             message: `Ficha ${data.queue_number} validada!\nAluno: ${data.student_name}`
           })
-          
+
           // Enviar Push Notification se necessário
           if (data.notify && data.notify.subscription) {
             try {
@@ -332,17 +332,17 @@ export default function AdminPage() {
 
   const handleProcessNoShows = async () => {
     if (!window.confirm('Isso vai marcar todos que não compareceram ontem como "Falta" e bloquear aqueles com 3 faltas no mês. Deseja continuar?')) return;
-    
+
     setProcessingNoShows(true)
     try {
       const { data, error } = await supabase.rpc('process_no_shows')
       if (error || data?.error) {
         setFeedback({ type: 'error', title: 'Erro', message: data?.error || error?.message || 'Falha ao processar.' })
       } else {
-        setFeedback({ 
-          type: 'success', 
-          title: 'Faltas Processadas', 
-          message: `${data.no_shows} reservas foram marcadas como falta (No-Show).\n${data.blocked} alunos foram bloqueados temporariamente por reincidência.` 
+        setFeedback({
+          type: 'success',
+          title: 'Faltas Processadas',
+          message: `${data.no_shows} reservas foram marcadas como falta (No-Show).\n${data.blocked} alunos foram bloqueados temporariamente por reincidência.`
         })
       }
     } catch {
@@ -415,9 +415,9 @@ export default function AdminPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-px" style={{ background: 'var(--gray-5)' }}>
           {[
             { label: 'Chamando', value: `#${queueInfo?.currentNumber || 0}`, color: 'var(--gov-green)' },
-            { label: 'Na Fila',  value: queueInfo?.totalWaiting || 0,      color: 'var(--gov-blue)' },
-            { label: 'Dentro',   value: adminStats?.currently_inside || 0,  color: 'var(--gov-orange)' },
-            { label: 'Total Hoje', value: queueInfo?.totalToday || 0,       color: 'var(--gray-90)' },
+            { label: 'Na Fila', value: queueInfo?.totalWaiting || 0, color: 'var(--gov-blue)' },
+            { label: 'Dentro', value: adminStats?.currently_inside || 0, color: 'var(--gov-orange)' },
+            { label: 'Total Hoje', value: queueInfo?.totalToday || 0, color: 'var(--gray-90)' },
           ].map((s, i) => (
             <div key={i} className="bg-white p-4 text-center">
               <span className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: 'var(--gray-40)' }}>{s.label}</span>
@@ -430,8 +430,8 @@ export default function AdminPage() {
         <div className="grid grid-cols-3 gap-px" style={{ background: 'var(--gray-5)' }}>
           {[
             { icon: <Clock className="w-4 h-4" />, value: `${adminStats?.avg_duration_minutes || 0}m`, label: 'Tempo Médio', color: 'var(--gov-orange)' },
-            { icon: <UserX className="w-4 h-4" />,  value: adminStats?.skipped_count || 0,           label: 'Pulados',      color: 'var(--gov-red)' },
-            { icon: <BarChart3 className="w-4 h-4" />, value: queueInfo?.maxTickets || 200,           label: 'Cota Diária',  color: 'var(--gov-blue)' },
+            { icon: <UserX className="w-4 h-4" />, value: adminStats?.skipped_count || 0, label: 'Pulados', color: 'var(--gov-red)' },
+            { icon: <BarChart3 className="w-4 h-4" />, value: queueInfo?.maxTickets || 200, label: 'Cota Diária', color: 'var(--gov-blue)' },
           ].map((s, i) => (
             <div key={i} className="bg-white p-3 flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
               <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0" style={{ background: s.color, opacity: 1, color: '#fff' }}>
@@ -448,9 +448,9 @@ export default function AdminPage() {
         {/* Tabs — estilo GOV.BR */}
         <div className="gov-card flex overflow-hidden" style={{ borderBottom: '2px solid var(--gray-5)' }}>
           {[
-            { key: 'scanner', icon: <ScanLine className="w-4 h-4" />, label: 'Scanner QR',         shortLabel: 'QR',    activeColor: 'var(--gov-blue)' },
-            { key: 'queue',   icon: <Users className="w-4 h-4" />,    label: `Fila (${waitingTickets.length})`, shortLabel: 'Fila',  activeColor: 'var(--gov-blue)' },
-            { key: 'stats',   icon: <BarChart3 className="w-4 h-4" />,label: 'Relatório',           shortLabel: 'Stats', activeColor: 'var(--gov-blue)' },
+            { key: 'scanner', icon: <ScanLine className="w-4 h-4" />, label: 'Scanner QR', shortLabel: 'QR', activeColor: 'var(--gov-blue)' },
+            { key: 'queue', icon: <Users className="w-4 h-4" />, label: `Fila (${waitingTickets.length})`, shortLabel: 'Fila', activeColor: 'var(--gov-blue)' },
+            { key: 'stats', icon: <BarChart3 className="w-4 h-4" />, label: 'Relatório', shortLabel: 'Relatório', activeColor: 'var(--gov-blue)' },
           ].map(tab => (
             <button
               key={tab.key}
