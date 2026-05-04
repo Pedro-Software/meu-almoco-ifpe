@@ -244,12 +244,14 @@ BEGIN
 
   UPDATE public.queue_state SET current_number = GREATEST(current_number, v_reservation.queue_number) WHERE id = 1;
 
-  -- Verificar se alguém está 5 posições à frente para notificar
+  -- Buscar a 5ª pessoa que está atualmente esperando na fila (à prova de pulos/cancelamentos)
   SELECT r.user_id, r.queue_number INTO v_notify_user_id, v_notify_queue_number
   FROM public.reservations r
   WHERE r.reservation_date = CURRENT_DATE
     AND r.status = 'reserved'
-    AND r.queue_number = v_reservation.queue_number + 5;
+    AND r.queue_number > v_reservation.queue_number
+  ORDER BY r.queue_number ASC
+  OFFSET 4 LIMIT 1;
 
   IF v_notify_user_id IS NOT NULL THEN
     SELECT ps.subscription INTO v_notify_subscription
