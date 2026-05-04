@@ -163,7 +163,7 @@ export default function AdminPage() {
     setAdminSuccess('')
     setAdminActionLoading(true)
     try {
-      const { data, error } = await supabase.rpc('manage_admin', { p_email: email, p_action: 'remove' })
+      const { data, error } = await supabase.rpc('manage_admin', { p_email: email, p_action: 'remove', p_role: 'admin' })
       if (error) {
         setAdminError(error.message)
       } else if (data?.error) {
