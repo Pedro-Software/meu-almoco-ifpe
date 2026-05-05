@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ChevronLeft, ChevronRight, Calendar, Lock, Loader2 } from 'lucide-react'
 
@@ -26,7 +26,8 @@ export function WeeklyReservation() {
   const [blockedUntil, setBlockedUntil] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const supabase = createClient()
+  // Client estável: useMemo garante que a referência não muda entre re-renders
+  const supabase = useMemo(() => createClient(), [])
 
   const calculateWeekDays = useCallback((date: Date) => {
     const days: Date[] = []

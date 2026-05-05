@@ -1,12 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { LogOut, FileDown, Activity, Users, CalendarDays, Loader2, Download, Utensils, ChevronLeft } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { useCallback } from 'react'
 
 interface DailyStat {
   date: string
@@ -60,54 +59,61 @@ export default function NutricionistaDashboard() {
 
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
+  const [error, setError] = useState<string | null>(null)
 
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/login')
-      return
-    }
+    setError(null)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login')
+        return
+      }
 
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-    if (profile?.role !== 'nutricionista' && profile?.role !== 'admin') {
-      router.push('/dashboard')
-      return
-    }
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+      if (profile?.role !== 'nutricionista' && profile?.role !== 'admin') {
+        router.push('/dashboard')
+        return
+      }
 
-    const { data: upData } = await supabase.rpc('get_upcoming_counts')
-    if (upData?.success) {
-      setUpcoming(upData.upcoming)
-    }
+      const { data: upData } = await supabase.rpc('get_upcoming_counts')
+      if (upData?.success) {
+        setUpcoming(upData.upcoming)
+      }
 
-    const { data: monthData } = await supabase.rpc('get_monthly_report', {
-      p_month: selectedMonth,
-      p_year: selectedYear
-    })
-
-    if (monthData?.success) {
-      setMonthlyData(monthData.daily)
-      setMonthlySummary({
-        total_reserved: monthData.total_reserved,
-        total_confirmed: monthData.total_confirmed,
-        total_no_show: monthData.total_no_show,
-        total_cancelled: monthData.total_cancelled || 0,
-        attendance_rate: monthData.attendance_rate
+      const { data: monthData } = await supabase.rpc('get_monthly_report', {
+        p_month: selectedMonth,
+        p_year: selectedYear
       })
-    }
 
-    setLoading(false)
+      if (monthData?.success) {
+        setMonthlyData(monthData.daily)
+        setMonthlySummary({
+          total_reserved: monthData.total_reserved,
+          total_confirmed: monthData.total_confirmed,
+          total_no_show: monthData.total_no_show,
+          total_cancelled: monthData.total_cancelled || 0,
+          attendance_rate: monthData.attendance_rate
+        })
+      }
+    } catch (err) {
+      console.error('Erro ao carregar os dados da nutricionista:', err)
+      setError('Não foi possível carregar os dados. Verifique sua conexão e tente novamente.')
+    } finally {
+      setLoading(false)
+    }
   }, [supabase, router, selectedMonth, selectedYear])
 
   useEffect(() => {
     loadData()
   }, [loadData])
 
-  const handleLogout = () => {
-    supabase.auth.signOut()
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
     router.push('/login')
   }
 
@@ -229,6 +235,12 @@ export default function NutricionistaDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto w-full px-4 py-6 space-y-6">
+
+        {error && (
+          <div className="p-4 rounded-md border text-sm font-medium" style={{ background: 'var(--gov-red-light)', color: 'var(--gov-red)', borderColor: '#f4a9a1' }}>
+            {error}
+          </div>
+        )}
 
         {/* Seção: Previsão */}
         <section>

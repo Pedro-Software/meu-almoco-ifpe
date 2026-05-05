@@ -67,7 +67,11 @@ BEGIN
     ));
   END IF;
 
-  -- Verificar limite de 500 reservas por dia (excluindo canceladas)
+  -- LOCK ANTECIPADO: serializa TODA a lógica de cota + queue_number
+  -- Deve vir ANTES da contagem para evitar race condition na cota de 500
+  PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
+
+  -- Verificar limite de 500 reservas por dia (agora sob lock)
   SELECT max_tickets INTO v_max_tickets FROM public.queue_state WHERE id = 1;
   
   SELECT COUNT(*) INTO v_total_reservations
@@ -80,8 +84,8 @@ BEGIN
 
   IF FOUND THEN
     IF v_existing.status = 'reserved' THEN
-      -- CANCELAR: remove queue_number e qr_token
-      UPDATE public.reservations SET status = 'cancelled', qr_token = NULL, queue_number = NULL
+      -- CANCELAR: preserva queue_number para histórico (evita reaproveitamento)
+      UPDATE public.reservations SET status = 'cancelled', qr_token = NULL
       WHERE id = v_existing.id;
       RETURN jsonb_build_object('success', true, 'action', 'cancelled',
         'message', format('Reserva cancelada para %s', to_char(p_date, 'DD/MM')));
@@ -92,9 +96,7 @@ BEGIN
         RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
       END IF;
 
-      -- Lock para evitar race condition na geração do queue_number
-      PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
-
+      -- MAX inclui queue_numbers de cancelados (preservados), garantindo unicidade
       SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_next_queue_number
       FROM public.reservations
       WHERE reservation_date = p_date;
@@ -116,9 +118,7 @@ BEGIN
       RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
     END IF;
 
-    -- Lock para evitar race condition na geração do queue_number
-    PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
-
+    -- MAX inclui queue_numbers de cancelados (preservados), garantindo unicidade
     SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_next_queue_number
     FROM public.reservations
     WHERE reservation_date = p_date;
@@ -229,6 +229,7 @@ DECLARE
   v_reservation RECORD;
   v_is_admin BOOLEAN;
   v_current_number INTEGER;
+  v_next_expected INTEGER;
   v_notify_user_id UUID;
   v_notify_subscription JSONB;
   v_notify_queue_number INTEGER;
@@ -251,11 +252,23 @@ BEGIN
     RETURN jsonb_build_object('type', 'error', 'message', 'Reserva cancelada ou inválida');
   END IF;
 
+  -- VALIDAÇÃO DE ORDEM: só permite confirmar o próximo da fila
+  SELECT current_number INTO v_current_number FROM public.queue_state WHERE id = 1;
+
+  SELECT MIN(queue_number) INTO v_next_expected
+  FROM public.reservations
+  WHERE reservation_date = CURRENT_DATE AND status = 'reserved';
+
+  IF v_reservation.queue_number != v_next_expected THEN
+    RETURN jsonb_build_object('type', 'error', 'message',
+      format('Fora de ordem. O próximo da fila é #%s. Esta reserva é #%s.',
+        LPAD(v_next_expected::text, 3, '0'),
+        LPAD(v_reservation.queue_number::text, 3, '0')));
+  END IF;
+
   -- Confirmar
   UPDATE public.reservations SET status = 'confirmed', qr_token = NULL, checked_in_at = now()
   WHERE id = v_reservation.id;
-
-  SELECT current_number INTO v_current_number FROM public.queue_state WHERE id = 1;
 
   UPDATE public.queue_state SET current_number = GREATEST(current_number, v_reservation.queue_number) WHERE id = 1;
 
