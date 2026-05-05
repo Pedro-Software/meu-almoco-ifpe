@@ -8,6 +8,7 @@ interface Reservation {
   id: string
   reservation_date: string
   status: string
+  queue_number?: number
 }
 
 export function WeeklyReservation() {
@@ -111,10 +112,48 @@ export function WeeklyReservation() {
   }
 
   const canModify = (date: Date) => {
-    const limit = new Date()
-    limit.setHours(0, 0, 0, 0)
-    limit.setDate(limit.getDate() + 1)
-    return date > limit
+    const now = new Date()
+    const today = new Date(now)
+    today.setHours(0, 0, 0, 0)
+
+    const dateOnly = new Date(date)
+    dateOnly.setHours(0, 0, 0, 0)
+
+    // Não permite datas passadas
+    if (dateOnly < today) return false
+
+    // Se for hoje, só permite até 11:30
+    if (dateOnly.getTime() === today.getTime()) {
+      const hours = now.getHours()
+      const minutes = now.getMinutes()
+      if (hours > 11 || (hours === 11 && minutes >= 30)) return false
+    }
+
+    // REGRA: Abertura com no máximo 2 dias de antecedência
+    // Hoje pode reservar: hoje (D), amanhã (D+1), depois de amanhã (D+2)
+    const maxDate = new Date(today)
+    maxDate.setDate(today.getDate() + 2)
+    if (dateOnly > maxDate) return false
+
+    return true
+  }
+
+  // Verifica se a data ainda não abriu para reserva (mais de 2 dias no futuro)
+  const isNotYetOpen = (date: Date) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const dateOnly = new Date(date)
+    dateOnly.setHours(0, 0, 0, 0)
+    const maxDate = new Date(today)
+    maxDate.setDate(today.getDate() + 2)
+    return dateOnly > maxDate
+  }
+
+  // Retorna a data de abertura da reserva (D-2)
+  const getOpeningDate = (date: Date) => {
+    const openDate = new Date(date)
+    openDate.setDate(openDate.getDate() - 2)
+    return openDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
   }
 
   const isPrevDisabled = () => {
@@ -226,11 +265,19 @@ export function WeeklyReservation() {
                         {isReserved ? 'Almoço Reservado' : 'Sem reserva'}
                       </span>
                       <span className="text-xs mt-0.5" style={{ color: 'var(--gray-40)' }}>
-                        {!editable && !isReserved && (
+                        {isReserved && reservation?.queue_number && (
+                          <span className="flex items-center gap-1" style={{ color: 'var(--gov-blue)', fontWeight: 600 }}>
+                            Fila #{reservation.queue_number.toString().padStart(3, '0')}
+                          </span>
+                        )}
+                        {!editable && !isReserved && isNotYetOpen(date) && (
+                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> Abre em {getOpeningDate(date)}</span>
+                        )}
+                        {!editable && !isReserved && !isNotYetOpen(date) && (
                           <span className="flex items-center gap-1"><Lock className="w-3 h-3" /> Prazo encerrado</span>
                         )}
                         {editable && !isReserved && 'Clique para reservar'}
-                        {!editable && isReserved && 'Não é possível cancelar agora'}
+                        {!editable && isReserved && !reservation?.queue_number && 'Não é possível cancelar agora'}
                       </span>
                     </div>
                   </div>
@@ -269,7 +316,7 @@ export function WeeklyReservation() {
       <div className="px-4 py-3 flex items-start gap-3" style={{ background: '#E8F0FE', borderTop: '1px solid #c2d5f5' }}>
         <Calendar className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: 'var(--gov-blue)' }} />
         <p className="text-xs leading-relaxed" style={{ color: 'var(--gov-blue)' }}>
-          <strong>Regra:</strong> Reserve ou cancele com no mínimo <strong>2 dias de antecedência</strong>. Planeje sua semana com antecedência.
+          <strong>Regra:</strong> A reserva abre <strong>2 dias antes</strong> e permanece disponível até <strong>11:30 do próprio dia</strong>. Quem reserva primeiro tem prioridade na fila.
         </p>
       </div>
     </div>

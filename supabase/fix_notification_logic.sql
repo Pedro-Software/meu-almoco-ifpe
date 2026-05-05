@@ -74,3 +74,49 @@ BEGIN
     ELSE NULL END
   );
 END; $$;
+
+-- =========================================================================
+-- LÓGICA DO PAINEL PÚBLICO (CORREÇÃO DE CONTAGEM)
+-- Apenas conta pessoas que realmente já têm um número de fila gerado
+-- =========================================================================
+CREATE OR REPLACE FUNCTION public.get_public_panel_reservations()
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_current_number INTEGER;
+  v_total_confirmed INTEGER;
+  v_total_reserved INTEGER;
+  v_total_today INTEGER;
+  v_next_in_line jsonb;
+  v_recently_served jsonb;
+BEGIN
+  PERFORM public.reset_daily_queue();
+  SELECT current_number INTO v_current_number FROM public.queue_state WHERE id = 1;
+
+  -- Correção: Só contar para a fila quem já tem queue_number
+  SELECT COUNT(*) FILTER (WHERE status = 'confirmed'),
+         COUNT(*) FILTER (WHERE status = 'reserved' AND queue_number IS NOT NULL),
+         COUNT(*) FILTER (WHERE queue_number IS NOT NULL)
+  INTO v_total_confirmed, v_total_reserved, v_total_today
+  FROM public.reservations WHERE reservation_date = CURRENT_DATE AND status IN ('reserved', 'confirmed');
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+    'queue_number', r.queue_number, 'student_name', p.full_name
+  ) ORDER BY r.queue_number ASC), '[]'::jsonb) INTO v_next_in_line
+  FROM (SELECT * FROM public.reservations
+    WHERE reservation_date = CURRENT_DATE AND status = 'reserved' AND queue_number IS NOT NULL
+      AND queue_number > v_current_number ORDER BY queue_number LIMIT 10) r
+  JOIN public.profiles p ON p.id = r.user_id;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+    'queue_number', r.queue_number, 'student_name', p.full_name, 'entered_at', r.checked_in_at
+  ) ORDER BY r.checked_in_at DESC), '[]'::jsonb) INTO v_recently_served
+  FROM (SELECT * FROM public.reservations
+    WHERE reservation_date = CURRENT_DATE AND status = 'confirmed'
+    ORDER BY checked_in_at DESC LIMIT 5) r
+  JOIN public.profiles p ON p.id = r.user_id;
+
+  RETURN jsonb_build_object(
+    'current_number', v_current_number, 'total_served', v_total_confirmed,
+    'total_waiting', v_total_reserved, 'total_today', v_total_today,
+    'next_in_line', v_next_in_line, 'recently_served', v_recently_served);
+END; $$;

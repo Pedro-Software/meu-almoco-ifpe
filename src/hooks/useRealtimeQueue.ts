@@ -26,15 +26,23 @@ export function useRealtimeQueue() {
   const supabase = createClient()
 
   const fetchQueueInfo = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_queue_info')
+    // Buscar dados do painel público (baseado em reservations)
+    const { data, error } = await supabase.rpc('get_public_panel_reservations')
     if (!error && data) {
+      // Buscar também alert_threshold e max_tickets do queue_state
+      const { data: qState } = await supabase
+        .from('queue_state')
+        .select('avg_service_time_seconds, max_tickets, alert_threshold')
+        .eq('id', 1)
+        .single()
+
       setQueueInfo({
         currentNumber: data.current_number || 0,
         totalWaiting: data.total_waiting || 0,
         totalToday: data.total_today || 0,
-        avgServiceTime: data.avg_service_time_seconds || 45,
-        maxTickets: data.max_tickets || 200,
-        alertThreshold: data.alert_threshold || 10,
+        avgServiceTime: qState?.avg_service_time_seconds || 45,
+        maxTickets: qState?.max_tickets || 200,
+        alertThreshold: qState?.alert_threshold || 10,
       })
     }
     setLoading(false)
@@ -56,12 +64,12 @@ export function useRealtimeQueue() {
       )
       .subscribe()
 
-    // Subscribe para novos tickets
-    const ticketChannel = supabase
-      .channel('realtime:tickets')
+    // Subscribe para mudanças em reservations (substitui tickets)
+    const reservationChannel = supabase
+      .channel('realtime:reservations')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'tickets' },
+        { event: '*', schema: 'public', table: 'reservations' },
         () => {
           fetchQueueInfo()
         }
@@ -70,7 +78,7 @@ export function useRealtimeQueue() {
 
     return () => {
       supabase.removeChannel(queueChannel)
-      supabase.removeChannel(ticketChannel)
+      supabase.removeChannel(reservationChannel)
     }
   }, [supabase, fetchQueueInfo])
 

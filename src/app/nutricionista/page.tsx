@@ -23,6 +23,7 @@ interface MonthlyStat {
   total: number
   confirmed: number
   no_show: number
+  cancelled: number
 }
 
 interface UpcomingStat {
@@ -53,6 +54,7 @@ export default function NutricionistaDashboard() {
     total_reserved: 0,
     total_confirmed: 0,
     total_no_show: 0,
+    total_cancelled: 0,
     attendance_rate: 0
   })
 
@@ -92,6 +94,7 @@ export default function NutricionistaDashboard() {
         total_reserved: monthData.total_reserved,
         total_confirmed: monthData.total_confirmed,
         total_no_show: monthData.total_no_show,
+        total_cancelled: monthData.total_cancelled || 0,
         attendance_rate: monthData.attendance_rate
       })
     }
@@ -124,19 +127,21 @@ export default function NutricionistaDashboard() {
     doc.text(`Total de Reservas: ${monthlySummary.total_reserved}`, 14, 40)
     doc.text(`Comparecimentos: ${monthlySummary.total_confirmed}`, 14, 45)
     doc.text(`Faltas (No-Show): ${monthlySummary.total_no_show}`, 14, 50)
-    doc.text(`Taxa de Frequência: ${monthlySummary.attendance_rate}%`, 14, 55)
+    doc.text(`Cancelamentos: ${monthlySummary.total_cancelled}`, 14, 55)
+    doc.text(`Taxa de Frequência: ${monthlySummary.attendance_rate}%`, 14, 60)
 
     const tableData = monthlyData.map(day => [
       formatDatePT(day.date),
       getWeekdayPT(day.date),
       day.total,
       day.confirmed,
-      day.no_show
+      day.no_show,
+      day.cancelled || 0
     ])
 
     autoTable(doc, {
-      startY: 65,
-      head: [['Data', 'Dia', 'Reservas', 'Compareceram', 'Faltaram']],
+      startY: 70,
+      head: [['Data', 'Dia', 'Reservas', 'Compareceram', 'Faltaram', 'Cancelados']],
       body: tableData,
       headStyles: { fillColor: [19, 81, 180] },
       alternateRowStyles: { fillColor: [248, 248, 248] },
@@ -147,13 +152,14 @@ export default function NutricionistaDashboard() {
   }
 
   const exportCSV = () => {
-    const headers = ['Data', 'Dia da Semana', 'Total Reservas', 'Compareceram', 'Faltaram']
+    const headers = ['Data', 'Dia da Semana', 'Total Reservas', 'Compareceram', 'Faltaram', 'Cancelados']
     const rows = monthlyData.map(day => [
       day.date,
       getWeekdayPT(day.date),
       day.total,
       day.confirmed,
-      day.no_show
+      day.no_show,
+      day.cancelled || 0
     ])
 
     const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n')
@@ -296,11 +302,12 @@ export default function NutricionistaDashboard() {
           </div>
 
           {/* Cards de resumo */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: 'var(--gray-5)' }}>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-px" style={{ background: 'var(--gray-5)' }}>
             {[
               { label: 'Total de Reservas', value: monthlySummary.total_reserved, color: 'var(--gov-blue)' },
               { label: 'Comparecimentos', value: monthlySummary.total_confirmed, color: 'var(--gov-green)' },
               { label: 'Faltas (No-Show)', value: monthlySummary.total_no_show, color: 'var(--gov-red)' },
+              { label: 'Cancelamentos', value: monthlySummary.total_cancelled, color: 'var(--gov-orange)' },
               { label: 'Taxa de Frequência', value: `${monthlySummary.attendance_rate}%`, color: 'var(--gov-blue-dark)' },
             ].map((stat, i) => (
               <div key={i} className="bg-white p-5">
@@ -339,7 +346,7 @@ export default function NutricionistaDashboard() {
             <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
               <thead style={{ background: 'var(--gray-2)' }}>
                 <tr>
-                  {['Data', 'Dia da Semana', 'Reservas', 'Compareceram', 'Faltaram'].map((h, i) => (
+                  {['Data', 'Dia da Semana', 'Reservas', 'Compareceram', 'Faltaram', 'Cancelados'].map((h, i) => (
                     <th
                       key={i}
                       className={`px-5 py-3 text-xs font-bold uppercase tracking-wider ${i > 1 ? 'text-right' : 'text-left'}`}
@@ -368,10 +375,11 @@ export default function NutricionistaDashboard() {
                     <td className="px-5 py-3 text-right tabular-nums" style={{ color: 'var(--gray-90)' }}>{day.total}</td>
                     <td className="px-5 py-3 text-right tabular-nums font-bold" style={{ color: 'var(--gov-green)' }}>{day.confirmed}</td>
                     <td className="px-5 py-3 text-right tabular-nums font-bold" style={{ color: 'var(--gov-red)' }}>{day.no_show}</td>
+                    <td className="px-5 py-3 text-right tabular-nums font-bold" style={{ color: 'var(--gov-orange)' }}>{day.cancelled || 0}</td>
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={5} className="px-5 py-12 text-center text-sm" style={{ color: 'var(--gray-20)' }}>
+                    <td colSpan={6} className="px-5 py-12 text-center text-sm" style={{ color: 'var(--gray-20)' }}>
                       Nenhum dado registrado para este mês.
                     </td>
                   </tr>

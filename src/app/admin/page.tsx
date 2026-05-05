@@ -431,7 +431,7 @@ export default function AdminPage() {
           {[
             { icon: <Clock className="w-4 h-4" />, value: `${adminStats?.avg_duration_minutes || 0}m`, label: 'Tempo Médio', color: 'var(--gov-orange)' },
             { icon: <UserX className="w-4 h-4" />, value: adminStats?.skipped_count || 0, label: 'Pulados', color: 'var(--gov-red)' },
-            { icon: <BarChart3 className="w-4 h-4" />, value: queueInfo?.maxTickets || 200, label: 'Cota Diária', color: 'var(--gov-blue)' },
+            { icon: <BarChart3 className="w-4 h-4" />, value: queueInfo?.maxTickets || 500, label: 'Cota Diária', color: 'var(--gov-blue)' },
           ].map((s, i) => (
             <div key={i} className="bg-white p-3 flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
               <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0" style={{ background: s.color, opacity: 1, color: '#fff' }}>
@@ -589,11 +589,11 @@ export default function AdminPage() {
                   <div className="rounded-full h-2 overflow-hidden" style={{ background: 'var(--gray-5)' }}>
                     <div
                       className="h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(100, ((queueInfo?.totalToday || 0) / (queueInfo?.maxTickets || 200)) * 100)}%`, background: 'var(--gov-blue)' }}
+                      style={{ width: `${Math.min(100, ((queueInfo?.totalToday || 0) / (queueInfo?.maxTickets || 500)) * 100)}%`, background: 'var(--gov-blue)' }}
                     />
                   </div>
                   <span className="text-xs mt-1 block" style={{ color: 'var(--gray-40)' }}>
-                    {queueInfo?.totalToday || 0} / {queueInfo?.maxTickets || 200} cota diária
+                    {queueInfo?.totalToday || 0} / {queueInfo?.maxTickets || 500} cota diária
                   </span>
                 </div>
                 <div className="bg-white p-5">

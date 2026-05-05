@@ -1,89 +1,196 @@
 -- ============================================
--- MIGRAÇÃO: Sistema de Reserva Semanal
+-- MIGRAÇÃO DEFINITIVA: Nova Regra de Reservas v2
+-- 
+-- Correções:
+--   1. Timezone fixado em America/Recife em TODAS as funções
+--      (Supabase usa UTC por padrão, sem isso o corte de 11:30 falharia)
+--   2. Reserva abre com 2 dias de antecedência e permanece até 11:30 do dia
+--   3. Número de fila gerado NO MOMENTO da reserva (FIFO)
+--   4. Cota diária: 500 reservas
+--   5. Re-reserva ganha novo queue_number no final
+--   6. Relatório mensal agora inclui contagem de cancelamentos
+--   7. Previsão inclui reserved + confirmed para precisão
+--
 -- Cole TUDO isso no SQL Editor do Supabase e clique "Run"
 -- ============================================
 
--- 1. Atualizar tabela profiles
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS phone TEXT;
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS blocked_until DATE;
-ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
-ALTER TABLE public.profiles ADD CONSTRAINT profiles_role_check
-  CHECK (role IN ('student', 'admin', 'nutricionista'));
-
--- 2. Tabela de Reservas
-CREATE TABLE IF NOT EXISTS public.reservations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  reservation_date DATE NOT NULL,
-  status TEXT NOT NULL DEFAULT 'reserved'
-    CHECK (status IN ('reserved', 'confirmed', 'cancelled', 'no_show')),
-  qr_token TEXT,
-  queue_number INTEGER,
-  checked_in_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(user_id, reservation_date)
-);
-
-ALTER TABLE public.reservations ENABLE ROW LEVEL SECURITY;
-
-CREATE INDEX IF NOT EXISTS idx_reservations_user_date ON public.reservations (user_id, reservation_date);
-CREATE INDEX IF NOT EXISTS idx_reservations_date_status ON public.reservations (reservation_date, status);
-CREATE INDEX IF NOT EXISTS idx_reservations_qr_token ON public.reservations (qr_token);
-
-DO $$ BEGIN
-  CREATE POLICY "Alunos podem ver suas reservas" ON public.reservations FOR SELECT USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-  CREATE POLICY "Alunos podem inserir reservas" ON public.reservations FOR INSERT WITH CHECK (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-  CREATE POLICY "Alunos podem atualizar reservas" ON public.reservations FOR UPDATE USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-  CREATE POLICY "Admins podem ver todas reservas" ON public.reservations FOR SELECT
-    USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'nutricionista')));
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-  CREATE POLICY "Admins podem atualizar reservas" ON public.reservations FOR UPDATE
-    USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
--- 3. Tabela de No-Show Records
-CREATE TABLE IF NOT EXISTS public.no_show_records (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  reservation_id UUID REFERENCES public.reservations(id),
-  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-ALTER TABLE public.no_show_records ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN
-  CREATE POLICY "Admins podem ver no_shows" ON public.no_show_records FOR SELECT
-    USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'nutricionista')));
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
--- 4. Tabela de Push Subscriptions
-CREATE TABLE IF NOT EXISTS public.push_subscriptions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  subscription JSONB NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(user_id)
-);
-ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
-DO $$ BEGIN
-  CREATE POLICY "Usuarios gerenciam sua subscription" ON public.push_subscriptions FOR ALL USING (auth.uid() = user_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
--- Habilitar realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE public.reservations;
+-- 1. Atualizar cota diária para 500
+UPDATE public.queue_state SET max_tickets = 500 WHERE id = 1;
 
 -- ============================================
--- 5. RPCs DE RESERVA
+-- 2. toggle_reservation — Função principal de reserva/cancelamento
 -- ============================================
+CREATE OR REPLACE FUNCTION public.toggle_reservation(p_date DATE)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
+DECLARE
+  v_user_id UUID;
+  v_existing RECORD;
+  v_blocked_until DATE;
+  v_total_reservations INTEGER;
+  v_max_tickets INTEGER;
+  v_next_queue_number INTEGER;
+BEGIN
+  v_user_id := auth.uid();
+  IF v_user_id IS NULL THEN RETURN jsonb_build_object('error', 'Não autenticado'); END IF;
 
--- 5a. Obter reservas da semana
+  -- Verificar bloqueio por faltas
+  SELECT blocked_until INTO v_blocked_until FROM public.profiles WHERE id = v_user_id;
+  IF v_blocked_until IS NOT NULL AND v_blocked_until > CURRENT_DATE THEN
+    RETURN jsonb_build_object('error', format('Conta bloqueada até %s por faltas', v_blocked_until));
+  END IF;
+
+  -- Apenas dias úteis (seg-sex)
+  IF EXTRACT(ISODOW FROM p_date) > 5 THEN
+    RETURN jsonb_build_object('error', 'Reservas apenas para dias úteis (seg-sex)');
+  END IF;
+
+  -- REGRA: Não permite datas passadas
+  IF p_date < CURRENT_DATE THEN
+    RETURN jsonb_build_object('error', 'Não é possível reservar para datas passadas');
+  END IF;
+
+  -- REGRA: Se for hoje, só permite até 11:30 (horário de Recife)
+  IF p_date = CURRENT_DATE AND LOCALTIME > '11:30:00'::TIME THEN
+    RETURN jsonb_build_object('error', 'As reservas para hoje encerraram às 11:30');
+  END IF;
+
+  -- REGRA: Abertura com antecedência máxima de 2 dias
+  IF p_date > CURRENT_DATE + INTERVAL '2 days' THEN
+    RETURN jsonb_build_object('error', format(
+      'A reserva para %s só abrirá em %s (2 dias antes)',
+      to_char(p_date, 'DD/MM'),
+      to_char(p_date - INTERVAL '2 days', 'DD/MM')
+    ));
+  END IF;
+
+  -- Verificar limite de 500 reservas por dia (excluindo canceladas)
+  SELECT max_tickets INTO v_max_tickets FROM public.queue_state WHERE id = 1;
+  
+  SELECT COUNT(*) INTO v_total_reservations
+  FROM public.reservations
+  WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed');
+
+  -- Buscar reserva existente do usuário para essa data
+  SELECT * INTO v_existing FROM public.reservations
+  WHERE user_id = v_user_id AND reservation_date = p_date;
+
+  IF FOUND THEN
+    IF v_existing.status = 'reserved' THEN
+      -- CANCELAR: remove queue_number e qr_token
+      UPDATE public.reservations SET status = 'cancelled', qr_token = NULL, queue_number = NULL
+      WHERE id = v_existing.id;
+      RETURN jsonb_build_object('success', true, 'action', 'cancelled',
+        'message', format('Reserva cancelada para %s', to_char(p_date, 'DD/MM')));
+
+    ELSIF v_existing.status = 'cancelled' THEN
+      -- RE-RESERVAR: verifica cota e gera novo queue_number no final
+      IF v_total_reservations >= v_max_tickets THEN
+        RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
+      END IF;
+
+      -- Lock para evitar race condition na geração do queue_number
+      PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
+
+      SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_next_queue_number
+      FROM public.reservations
+      WHERE reservation_date = p_date;
+
+      UPDATE public.reservations 
+      SET status = 'reserved', created_at = now(), queue_number = v_next_queue_number
+      WHERE id = v_existing.id;
+
+      RETURN jsonb_build_object('success', true, 'action', 'reserved',
+        'message', format('Reserva confirmada para %s (Fila #%s)', to_char(p_date, 'DD/MM'), v_next_queue_number),
+        'queue_number', v_next_queue_number);
+
+    ELSE
+      RETURN jsonb_build_object('error', 'Esta reserva não pode ser alterada');
+    END IF;
+  ELSE
+    -- NOVA RESERVA: verifica cota e gera queue_number
+    IF v_total_reservations >= v_max_tickets THEN
+      RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
+    END IF;
+
+    -- Lock para evitar race condition na geração do queue_number
+    PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
+
+    SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_next_queue_number
+    FROM public.reservations
+    WHERE reservation_date = p_date;
+
+    INSERT INTO public.reservations (user_id, reservation_date, status, queue_number)
+    VALUES (v_user_id, p_date, 'reserved', v_next_queue_number);
+
+    RETURN jsonb_build_object('success', true, 'action', 'reserved',
+      'message', format('Reserva confirmada para %s (Fila #%s)', to_char(p_date, 'DD/MM'), v_next_queue_number),
+      'queue_number', v_next_queue_number);
+  END IF;
+END; $$;
+
+-- ============================================
+-- 3. get_today_reservation — QR Code do dia
+-- ============================================
+CREATE OR REPLACE FUNCTION public.get_today_reservation()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
+DECLARE
+  v_user_id UUID;
+  v_reservation RECORD;
+  v_qr_token TEXT;
+  v_student_name TEXT;
+BEGIN
+  v_user_id := auth.uid();
+  IF v_user_id IS NULL THEN RETURN jsonb_build_object('has_reservation', false); END IF;
+
+  SELECT * INTO v_reservation FROM public.reservations
+  WHERE user_id = v_user_id AND reservation_date = CURRENT_DATE AND status IN ('reserved', 'confirmed');
+
+  IF NOT FOUND THEN RETURN jsonb_build_object('has_reservation', false); END IF;
+
+  IF v_reservation.status = 'confirmed' THEN
+    RETURN jsonb_build_object('has_reservation', true, 'status', 'confirmed',
+      'queue_number', v_reservation.queue_number);
+  END IF;
+
+  -- Gerar QR token se não tem (queue_number já existe desde a reserva)
+  IF v_reservation.qr_token IS NULL THEN
+    v_qr_token := encode(sha256(
+      (v_user_id::text || CURRENT_DATE::text || v_reservation.id::text || random()::text)::bytea
+    ), 'hex');
+
+    UPDATE public.reservations SET qr_token = v_qr_token
+    WHERE id = v_reservation.id;
+
+    v_reservation.qr_token := v_qr_token;
+  END IF;
+
+  SELECT full_name INTO v_student_name FROM public.profiles WHERE id = v_user_id;
+
+  RETURN jsonb_build_object('has_reservation', true, 'status', 'reserved',
+    'reservation', jsonb_build_object(
+      'id', v_reservation.id, 'queue_number', v_reservation.queue_number,
+      'qr_token', v_reservation.qr_token, 'student_name', v_student_name,
+      'reservation_date', v_reservation.reservation_date
+    ));
+END; $$;
+
+-- ============================================
+-- 4. get_week_reservations — Reservas da semana
+-- ============================================
 CREATE OR REPLACE FUNCTION public.get_week_reservations(p_week_start DATE)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
 DECLARE
   v_user_id UUID;
   v_reservations jsonb;
@@ -109,107 +216,15 @@ BEGIN
   RETURN jsonb_build_object('success', true, 'reservations', v_reservations, 'blocked_until', v_blocked_until);
 END; $$;
 
--- 5b. Toggle reserva (criar ou cancelar)
-CREATE OR REPLACE FUNCTION public.toggle_reservation(p_date DATE)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_user_id UUID;
-  v_existing RECORD;
-  v_blocked_until DATE;
-BEGIN
-  v_user_id := auth.uid();
-  IF v_user_id IS NULL THEN RETURN jsonb_build_object('error', 'Não autenticado'); END IF;
-
-  SELECT blocked_until INTO v_blocked_until FROM public.profiles WHERE id = v_user_id;
-  IF v_blocked_until IS NOT NULL AND v_blocked_until > CURRENT_DATE THEN
-    RETURN jsonb_build_object('error', format('Conta bloqueada até %s por faltas', v_blocked_until));
-  END IF;
-
-  IF EXTRACT(ISODOW FROM p_date) > 5 THEN
-    RETURN jsonb_build_object('error', 'Reservas apenas para dias úteis (seg-sex)');
-  END IF;
-
-  IF p_date <= CURRENT_DATE + INTERVAL '1 day' THEN
-    RETURN jsonb_build_object('error', 'Reservas com no mínimo 2 dias de antecedência');
-  END IF;
-
-  SELECT * INTO v_existing FROM public.reservations
-  WHERE user_id = v_user_id AND reservation_date = p_date;
-
-  IF FOUND THEN
-    IF v_existing.status = 'reserved' THEN
-      UPDATE public.reservations SET status = 'cancelled', qr_token = NULL, queue_number = NULL
-      WHERE id = v_existing.id;
-      RETURN jsonb_build_object('success', true, 'action', 'cancelled',
-        'message', format('Reserva cancelada para %s', to_char(p_date, 'DD/MM')));
-    ELSIF v_existing.status = 'cancelled' THEN
-      UPDATE public.reservations SET status = 'reserved', created_at = now()
-      WHERE id = v_existing.id;
-      RETURN jsonb_build_object('success', true, 'action', 'reserved',
-        'message', format('Reserva confirmada para %s', to_char(p_date, 'DD/MM')));
-    ELSE
-      RETURN jsonb_build_object('error', 'Esta reserva não pode ser alterada');
-    END IF;
-  ELSE
-    INSERT INTO public.reservations (user_id, reservation_date, status)
-    VALUES (v_user_id, p_date, 'reserved');
-    RETURN jsonb_build_object('success', true, 'action', 'reserved',
-      'message', format('Reserva confirmada para %s', to_char(p_date, 'DD/MM')));
-  END IF;
-END; $$;
-
--- 5c. Obter reserva de hoje (com QR Code)
-CREATE OR REPLACE FUNCTION public.get_today_reservation()
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_user_id UUID;
-  v_reservation RECORD;
-  v_queue_number INTEGER;
-  v_qr_token TEXT;
-  v_student_name TEXT;
-BEGIN
-  v_user_id := auth.uid();
-  IF v_user_id IS NULL THEN RETURN jsonb_build_object('has_reservation', false); END IF;
-
-  SELECT * INTO v_reservation FROM public.reservations
-  WHERE user_id = v_user_id AND reservation_date = CURRENT_DATE AND status IN ('reserved', 'confirmed');
-
-  IF NOT FOUND THEN RETURN jsonb_build_object('has_reservation', false); END IF;
-
-  IF v_reservation.status = 'confirmed' THEN
-    RETURN jsonb_build_object('has_reservation', true, 'status', 'confirmed',
-      'queue_number', v_reservation.queue_number);
-  END IF;
-
-  -- Gerar QR token se não tem
-  IF v_reservation.qr_token IS NULL THEN
-    v_qr_token := encode(sha256(
-      (v_user_id::text || CURRENT_DATE::text || v_reservation.id::text || random()::text)::bytea
-    ), 'hex');
-
-    SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_queue_number
-    FROM public.reservations WHERE reservation_date = CURRENT_DATE AND queue_number IS NOT NULL;
-
-    UPDATE public.reservations SET qr_token = v_qr_token, queue_number = v_queue_number
-    WHERE id = v_reservation.id;
-
-    v_reservation.qr_token := v_qr_token;
-    v_reservation.queue_number := v_queue_number;
-  END IF;
-
-  SELECT full_name INTO v_student_name FROM public.profiles WHERE id = v_user_id;
-
-  RETURN jsonb_build_object('has_reservation', true, 'status', 'reserved',
-    'reservation', jsonb_build_object(
-      'id', v_reservation.id, 'queue_number', v_reservation.queue_number,
-      'qr_token', v_reservation.qr_token, 'student_name', v_student_name,
-      'reservation_date', v_reservation.reservation_date
-    ));
-END; $$;
-
--- 5d. Validar reserva (admin escaneia QR)
+-- ============================================
+-- 5. validate_reservation — Admin valida QR Code
+-- ============================================
 CREATE OR REPLACE FUNCTION public.validate_reservation(p_qr_token TEXT)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
 DECLARE
   v_reservation RECORD;
   v_is_admin BOOLEAN;
@@ -244,7 +259,7 @@ BEGIN
 
   UPDATE public.queue_state SET current_number = GREATEST(current_number, v_reservation.queue_number) WHERE id = 1;
 
-  -- Buscar a 5ª pessoa que está atualmente esperando na fila (à prova de pulos/cancelamentos)
+  -- Buscar a 5ª pessoa que está atualmente esperando na fila
   SELECT r.user_id, r.queue_number INTO v_notify_user_id, v_notify_queue_number
   FROM public.reservations r
   WHERE r.reservation_date = CURRENT_DATE
@@ -269,9 +284,15 @@ BEGIN
   );
 END; $$;
 
--- 5e. Processar no-shows (admin)
+-- ============================================
+-- 6. process_no_shows — Processar faltas
+-- ============================================
 CREATE OR REPLACE FUNCTION public.process_no_shows()
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
 DECLARE
   v_is_admin BOOLEAN;
   v_count INTEGER;
@@ -304,9 +325,136 @@ BEGIN
   RETURN jsonb_build_object('success', true, 'no_shows', v_count, 'blocked', v_block_count);
 END; $$;
 
--- 5f. Estatísticas para nutricionista
+-- ============================================
+-- 7. skip_and_requeue_reservation — Pular na fila
+-- ============================================
+CREATE OR REPLACE FUNCTION public.skip_and_requeue_reservation(p_reservation_id UUID)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
+DECLARE
+  v_role TEXT;
+  v_reservation RECORD;
+  v_max_number INTEGER;
+BEGIN
+  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
+  IF v_role != 'admin' THEN RETURN jsonb_build_object('error', 'Acesso negado'); END IF;
+
+  SELECT * INTO v_reservation FROM public.reservations WHERE id = p_reservation_id;
+  IF NOT FOUND THEN RETURN jsonb_build_object('error', 'Reserva não encontrada'); END IF;
+
+  -- Lock para evitar race condition
+  PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
+
+  SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_max_number
+  FROM public.reservations WHERE reservation_date = CURRENT_DATE;
+
+  UPDATE public.reservations SET queue_number = v_max_number WHERE id = p_reservation_id;
+
+  RETURN jsonb_build_object('success', true, 'message', format('Aluno enviado para o final da fila (novo número: #%s)', v_max_number));
+END; $$;
+
+-- ============================================
+-- 8. get_monthly_report — COM cancelamentos
+-- ============================================
+CREATE OR REPLACE FUNCTION public.get_monthly_report(p_month INT, p_year INT)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
+DECLARE
+  v_role TEXT;
+  v_start DATE;
+  v_end DATE;
+  v_total_reserved INT;
+  v_total_confirmed INT;
+  v_total_no_show INT;
+  v_total_cancelled INT;
+  v_daily jsonb;
+BEGIN
+  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
+  IF v_role NOT IN ('admin', 'nutricionista') THEN RETURN jsonb_build_object('error', 'Acesso negado'); END IF;
+
+  v_start := make_date(p_year, p_month, 1);
+  v_end := (v_start + INTERVAL '1 month' - INTERVAL '1 day')::date;
+
+  SELECT COUNT(*) FILTER (WHERE status IN ('reserved','confirmed')),
+         COUNT(*) FILTER (WHERE status = 'confirmed'),
+         COUNT(*) FILTER (WHERE status = 'no_show'),
+         COUNT(*) FILTER (WHERE status = 'cancelled')
+  INTO v_total_reserved, v_total_confirmed, v_total_no_show, v_total_cancelled
+  FROM public.reservations WHERE reservation_date BETWEEN v_start AND v_end;
+
+  SELECT COALESCE(jsonb_agg(
+    jsonb_build_object('date', d.dt, 'weekday', to_char(d.dt, 'Dy'),
+      'total', COALESCE(s.total, 0), 'confirmed', COALESCE(s.confirmed, 0),
+      'no_show', COALESCE(s.no_show, 0), 'cancelled', COALESCE(s.cancelled, 0))
+    ORDER BY d.dt
+  ), '[]'::jsonb) INTO v_daily
+  FROM generate_series(v_start, v_end, '1 day'::interval) AS d(dt)
+  LEFT JOIN (
+    SELECT reservation_date,
+      COUNT(*) FILTER (WHERE status IN ('reserved', 'confirmed')) AS total,
+      COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
+      COUNT(*) FILTER (WHERE status = 'no_show') AS no_show,
+      COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
+    FROM public.reservations WHERE reservation_date BETWEEN v_start AND v_end
+    GROUP BY reservation_date
+  ) s ON s.reservation_date = d.dt::date
+  WHERE EXTRACT(ISODOW FROM d.dt) <= 5;
+
+  RETURN jsonb_build_object('success', true,
+    'month', p_month, 'year', p_year,
+    'total_reserved', v_total_reserved, 'total_confirmed', v_total_confirmed,
+    'total_no_show', v_total_no_show, 'total_cancelled', v_total_cancelled,
+    'attendance_rate', CASE WHEN v_total_reserved > 0 THEN ROUND((v_total_confirmed::numeric / v_total_reserved) * 100, 1) ELSE 0 END,
+    'daily', v_daily);
+END; $$;
+
+-- ============================================
+-- 9. get_upcoming_counts — Previsão (reserved + confirmed)
+-- ============================================
+CREATE OR REPLACE FUNCTION public.get_upcoming_counts()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
+DECLARE
+  v_role TEXT;
+  v_counts jsonb;
+BEGIN
+  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
+  IF v_role NOT IN ('admin', 'nutricionista') THEN RETURN jsonb_build_object('error', 'Acesso negado'); END IF;
+
+  SELECT COALESCE(jsonb_agg(
+    jsonb_build_object('date', d.dt, 'weekday', to_char(d.dt, 'TMDy'),
+      'weekday_full', to_char(d.dt, 'TMDay'), 'count', COALESCE(s.cnt, 0))
+    ORDER BY d.dt
+  ), '[]'::jsonb) INTO v_counts
+  FROM generate_series(CURRENT_DATE, CURRENT_DATE + INTERVAL '6 days', '1 day'::interval) AS d(dt)
+  LEFT JOIN (
+    SELECT reservation_date, COUNT(*) AS cnt FROM public.reservations
+    WHERE status IN ('reserved', 'confirmed') AND reservation_date >= CURRENT_DATE
+    GROUP BY reservation_date
+  ) s ON s.reservation_date = d.dt::date
+  WHERE EXTRACT(ISODOW FROM d.dt) <= 5;
+
+  RETURN jsonb_build_object('success', true, 'upcoming', v_counts);
+END; $$;
+
+-- ============================================
+-- 10. get_reservation_stats — Stats nutricionista
+-- ============================================
 CREATE OR REPLACE FUNCTION public.get_reservation_stats(p_start DATE, p_end DATE)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
 DECLARE
   v_role TEXT;
   v_stats jsonb;
@@ -334,82 +482,15 @@ BEGIN
   RETURN jsonb_build_object('success', true, 'stats', v_stats);
 END; $$;
 
--- 5g. Relatório mensal
-CREATE OR REPLACE FUNCTION public.get_monthly_report(p_month INT, p_year INT)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_role TEXT;
-  v_start DATE;
-  v_end DATE;
-  v_total_reserved INT; v_total_confirmed INT; v_total_no_show INT;
-  v_daily jsonb;
-BEGIN
-  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
-  IF v_role NOT IN ('admin', 'nutricionista') THEN RETURN jsonb_build_object('error', 'Acesso negado'); END IF;
-
-  v_start := make_date(p_year, p_month, 1);
-  v_end := (v_start + INTERVAL '1 month' - INTERVAL '1 day')::date;
-
-  SELECT COUNT(*) FILTER (WHERE status IN ('reserved','confirmed')),
-         COUNT(*) FILTER (WHERE status = 'confirmed'),
-         COUNT(*) FILTER (WHERE status = 'no_show')
-  INTO v_total_reserved, v_total_confirmed, v_total_no_show
-  FROM public.reservations WHERE reservation_date BETWEEN v_start AND v_end;
-
-  SELECT COALESCE(jsonb_agg(
-    jsonb_build_object('date', d.dt, 'weekday', to_char(d.dt, 'Dy'),
-      'total', COALESCE(s.total, 0), 'confirmed', COALESCE(s.confirmed, 0),
-      'no_show', COALESCE(s.no_show, 0))
-    ORDER BY d.dt
-  ), '[]'::jsonb) INTO v_daily
-  FROM generate_series(v_start, v_end, '1 day'::interval) AS d(dt)
-  LEFT JOIN (
-    SELECT reservation_date,
-      COUNT(*) AS total,
-      COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
-      COUNT(*) FILTER (WHERE status = 'no_show') AS no_show
-    FROM public.reservations WHERE reservation_date BETWEEN v_start AND v_end
-    GROUP BY reservation_date
-  ) s ON s.reservation_date = d.dt::date
-  WHERE EXTRACT(ISODOW FROM d.dt) <= 5;
-
-  RETURN jsonb_build_object('success', true,
-    'month', p_month, 'year', p_year,
-    'total_reserved', v_total_reserved, 'total_confirmed', v_total_confirmed,
-    'total_no_show', v_total_no_show,
-    'attendance_rate', CASE WHEN v_total_reserved > 0 THEN ROUND((v_total_confirmed::numeric / v_total_reserved) * 100, 1) ELSE 0 END,
-    'daily', v_daily);
-END; $$;
-
--- 5h. Contagem dos próximos dias (nutricionista)
-CREATE OR REPLACE FUNCTION public.get_upcoming_counts()
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_role TEXT;
-  v_counts jsonb;
-BEGIN
-  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
-  IF v_role NOT IN ('admin', 'nutricionista') THEN RETURN jsonb_build_object('error', 'Acesso negado'); END IF;
-
-  SELECT COALESCE(jsonb_agg(
-    jsonb_build_object('date', d.dt, 'weekday', to_char(d.dt, 'TMDy'),
-      'weekday_full', to_char(d.dt, 'TMDay'), 'count', COALESCE(s.cnt, 0))
-    ORDER BY d.dt
-  ), '[]'::jsonb) INTO v_counts
-  FROM generate_series(CURRENT_DATE, CURRENT_DATE + INTERVAL '6 days', '1 day'::interval) AS d(dt)
-  LEFT JOIN (
-    SELECT reservation_date, COUNT(*) AS cnt FROM public.reservations
-    WHERE status = 'reserved' AND reservation_date >= CURRENT_DATE
-    GROUP BY reservation_date
-  ) s ON s.reservation_date = d.dt::date
-  WHERE EXTRACT(ISODOW FROM d.dt) <= 5;
-
-  RETURN jsonb_build_object('success', true, 'upcoming', v_counts);
-END; $$;
-
--- 5i. Atualizar painel público para reservas
+-- ============================================
+-- 11. Painel público
+-- ============================================
 CREATE OR REPLACE FUNCTION public.get_public_panel_reservations()
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
 DECLARE
   v_current_number INTEGER;
   v_total_confirmed INTEGER;
@@ -451,122 +532,15 @@ END; $$;
 
 GRANT EXECUTE ON FUNCTION public.get_public_panel_reservations() TO anon;
 
--- 5j. Salvar push subscription
-CREATE OR REPLACE FUNCTION public.save_push_subscription(p_subscription JSONB)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
-BEGIN
-  INSERT INTO public.push_subscriptions (user_id, subscription)
-  VALUES (auth.uid(), p_subscription)
-  ON CONFLICT (user_id) DO UPDATE SET subscription = p_subscription, created_at = now();
-  RETURN jsonb_build_object('success', true);
-END; $$;
-
--- 5k. Gerenciar admins e nutricionistas (apenas super admin)
-CREATE OR REPLACE FUNCTION public.manage_admin(p_email TEXT, p_action TEXT, p_role TEXT DEFAULT 'admin')
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  v_is_super BOOLEAN;
-  v_target_user_id UUID;
-  v_target_profile RECORD;
-BEGIN
-  SELECT EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = auth.uid() AND role = 'admin' AND is_super_admin = true
-  ) INTO v_is_super;
-
-  IF NOT v_is_super THEN
-    RETURN jsonb_build_object('error', 'Apenas super admins podem gerenciar cargos');
-  END IF;
-
-  IF p_action NOT IN ('add', 'remove') THEN
-    RETURN jsonb_build_object('error', 'Ação inválida. Use "add" ou "remove"');
-  END IF;
-
-  IF p_role NOT IN ('admin', 'nutricionista') THEN
-    RETURN jsonb_build_object('error', 'Cargo inválido. Use "admin" ou "nutricionista"');
-  END IF;
-
-  IF NOT (p_email LIKE '%@discente.ifpe.edu.br' OR p_email LIKE '%@ifpe.edu.br') THEN
-    RETURN jsonb_build_object('error', 'Apenas emails institucionais IFPE são aceitos');
-  END IF;
-
-  SELECT id INTO v_target_user_id FROM auth.users WHERE email = p_email;
-
-  IF v_target_user_id IS NULL THEN
-    RETURN jsonb_build_object('error', 'Usuário não encontrado.');
-  END IF;
-
-  IF v_target_user_id = auth.uid() THEN
-    RETURN jsonb_build_object('error', 'Você não pode alterar seu próprio papel');
-  END IF;
-
-  SELECT * INTO v_target_profile FROM public.profiles WHERE id = v_target_user_id;
-
-  IF p_action = 'add' THEN
-    IF v_target_profile.role = p_role THEN
-      RETURN jsonb_build_object('error', format('%s já é %s', p_email, p_role));
-    END IF;
-
-    UPDATE public.profiles SET role = p_role WHERE id = v_target_user_id;
-    RETURN jsonb_build_object('success', true, 'message', format('%s foi promovido a %s', p_email, p_role));
-  END IF;
-
-  IF p_action = 'remove' THEN
-    IF v_target_profile.is_super_admin THEN
-      RETURN jsonb_build_object('error', 'Não é possível remover um super administrador');
-    END IF;
-
-    UPDATE public.profiles SET role = 'student' WHERE id = v_target_user_id;
-    RETURN jsonb_build_object('success', true, 'message', format('%s foi removido', p_email));
-  END IF;
-
-  RETURN jsonb_build_object('error', 'Ação não processada');
-END;
-$$;
-
--- 5l. Listar admins e nutricionistas
-CREATE OR REPLACE FUNCTION public.list_admins()
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  v_is_super BOOLEAN;
-  v_admins jsonb;
-BEGIN
-  SELECT EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE id = auth.uid() AND role = 'admin' AND is_super_admin = true
-  ) INTO v_is_super;
-
-  IF NOT v_is_super THEN
-    RETURN jsonb_build_object('error', 'Apenas super admins podem listar a equipe');
-  END IF;
-
-  SELECT COALESCE(jsonb_agg(
-    jsonb_build_object(
-      'id', p.id,
-      'email', u.email,
-      'full_name', p.full_name,
-      'role', p.role,
-      'is_super_admin', p.is_super_admin,
-      'created_at', p.created_at
-    ) ORDER BY p.is_super_admin DESC, p.role ASC, p.full_name ASC
-  ), '[]'::jsonb) INTO v_admins
-  FROM public.profiles p
-  JOIN auth.users u ON u.id = p.id
-  WHERE p.role IN ('admin', 'nutricionista');
-
-  RETURN jsonb_build_object('success', true, 'admins', v_admins);
-END;
-$$;
-
--- 5m. Listar fila de espera (admin)
+-- ============================================
+-- 12. Funções admin com timezone
+-- ============================================
 CREATE OR REPLACE FUNCTION public.get_waiting_reservations()
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
 DECLARE
   v_role TEXT;
   v_tickets jsonb;
@@ -590,9 +564,12 @@ BEGIN
   RETURN v_tickets;
 END; $$;
 
--- 5n. Estatísticas do Admin
 CREATE OR REPLACE FUNCTION public.get_admin_reservation_stats()
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
 DECLARE
   v_role TEXT;
   v_avg_duration_minutes NUMERIC;
@@ -602,19 +579,16 @@ BEGIN
   SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
   IF v_role != 'admin' THEN RETURN jsonb_build_object('error', 'Acesso negado'); END IF;
 
-  -- Tempo médio na fila (considerando os confirmados de hoje)
   SELECT COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (checked_in_at - created_at))/60)::numeric, 1), 0)
   INTO v_avg_duration_minutes
   FROM public.reservations
   WHERE reservation_date = CURRENT_DATE AND status = 'confirmed' AND checked_in_at IS NOT NULL;
 
-  -- "No refeitório" (simplificação: pessoas que entraram nos últimos 30 mins)
   SELECT COUNT(*) INTO v_currently_inside
   FROM public.reservations
   WHERE reservation_date = CURRENT_DATE AND status = 'confirmed'
     AND checked_in_at >= now() - interval '30 minutes';
 
-  -- Faltosos de hoje (simplificação: fila pulou e o aluno ficou pra trás)
   SELECT COUNT(*) INTO v_skipped_count
   FROM public.reservations
   WHERE reservation_date = CURRENT_DATE AND status = 'no_show';
@@ -624,26 +598,4 @@ BEGIN
     'currently_inside', v_currently_inside,
     'skipped_count', v_skipped_count
   );
-END; $$;
-
--- 5o. Pular e re-enfileirar
-CREATE OR REPLACE FUNCTION public.skip_and_requeue_reservation(p_reservation_id UUID)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_role TEXT;
-  v_reservation RECORD;
-  v_max_number INTEGER;
-BEGIN
-  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
-  IF v_role != 'admin' THEN RETURN jsonb_build_object('error', 'Acesso negado'); END IF;
-
-  SELECT * INTO v_reservation FROM public.reservations WHERE id = p_reservation_id;
-  if NOT FOUND THEN RETURN jsonb_build_object('error', 'Reserva não encontrada'); END IF;
-
-  SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_max_number
-  FROM public.reservations WHERE reservation_date = CURRENT_DATE AND queue_number IS NOT NULL;
-
-  UPDATE public.reservations SET queue_number = v_max_number WHERE id = p_reservation_id;
-
-  RETURN jsonb_build_object('success', true, 'message', format('Aluno enviado para o final da fila (novo número: #%s)', v_max_number));
 END; $$;
