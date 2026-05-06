@@ -791,14 +791,13 @@ export default function AdminPage() {
               <div className="p-5 space-y-3">
                 <div className="flex flex-col sm:flex-row gap-2">
                   <div className="relative flex-1">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--gray-20)' }} />
                     <input
                       type="email"
                       value={newAdminEmail}
                       onChange={(e) => { setNewAdminEmail(e.target.value); setAdminError(''); setAdminSuccess(''); }}
                       onKeyDown={(e) => e.key === 'Enter' && handleAddAdmin()}
                       placeholder="email@discente.ifpe.edu.br"
-                      className="gov-input pl-10"
+                      className="gov-input"
                     />
                   </div>
                   <select
