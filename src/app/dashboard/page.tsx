@@ -69,11 +69,13 @@ export default function Dashboard() {
     ? 'Administrador'
     : userRole === 'nutricionista'
     ? 'Nutricionista'
-    : null
+    : 'Estudante'
 
   const roleBadgeColor = userRole === 'admin'
     ? { background: '#071D41', color: '#FFCD07' }
-    : { background: '#1351B4', color: '#fff' }
+    : userRole === 'nutricionista'
+    ? { background: '#1351B4', color: '#fff' }
+    : { background: 'rgba(255, 255, 255, 0.2)', color: '#fff' }
 
   if (loading) {
     return (
