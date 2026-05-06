@@ -248,3 +248,104 @@ body {
 .badge-gov-error   { background: var(--gov-red-light);   color: var(--gov-red);   }
 .badge-gov-warn    { background: var(--gov-orange-light); color: var(--gov-orange); }
 .badge-gov-info    { background: #E8F0FE;                 color: var(--gov-blue);  }
+
+/* ============================================
+   OVERRIDES PARA HTML5-QRCODE (LEITOR)
+   ============================================ */
+
+#reader {
+  border: none !important;
+  padding-bottom: 1rem;
+}
+
+#reader__dashboard_section_csr span {
+  display: none !important;
+}
+
+/* Botões do Scanner */
+#html5-qrcode-button-camera-permission,
+#html5-qrcode-button-camera-start,
+#html5-qrcode-button-camera-stop,
+#html5-qrcode-button-file-selection {
+  background: var(--gov-blue) !important;
+  color: #fff !important;
+  font-family: var(--font-primary) !important;
+  font-weight: 700 !important;
+  font-size: 0 !important; /* Esconde o texto original em inglês */
+  padding: 0.75rem 1.5rem !important;
+  border: none !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease !important;
+  margin: 8px 4px !important;
+  display: inline-block !important;
+}
+
+#html5-qrcode-button-camera-permission:hover,
+#html5-qrcode-button-camera-start:hover,
+#html5-qrcode-button-camera-stop:hover,
+#html5-qrcode-button-file-selection:hover {
+  background: var(--gov-blue-light) !important;
+}
+
+/* Tradução dos botões via pseudoelemento */
+#html5-qrcode-button-camera-permission::after {
+  content: "Permitir Câmera";
+  font-size: 0.875rem;
+}
+
+#html5-qrcode-button-camera-start::after {
+  content: "Iniciar Câmera";
+  font-size: 0.875rem;
+}
+
+#html5-qrcode-button-camera-stop::after {
+  content: "Parar Câmera";
+  font-size: 0.875rem;
+  background: var(--gov-red);
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  margin: -0.75rem -1.5rem;
+  display: block;
+}
+
+#html5-qrcode-button-file-selection::after {
+  content: "Escolher Arquivo QR";
+  font-size: 0.875rem;
+}
+
+/* Seletor de Câmera */
+#html5-qrcode-select-camera {
+  display: block !important;
+  width: 100% !important;
+  max-width: 300px;
+  margin: 0 auto 12px auto !important;
+  background: #fff !important;
+  border: 1px solid var(--gray-20) !important;
+  border-radius: 4px !important;
+  padding: 0.5rem !important;
+  font-family: var(--font-primary) !important;
+  font-size: 0.875rem !important;
+  color: var(--gray-90) !important;
+}
+
+/* Link de alternar modo (Câmera / Imagem) */
+#html5-qrcode-anchor-scan-type-change {
+  color: var(--gov-yellow) !important;
+  font-family: var(--font-primary) !important;
+  font-weight: 700 !important;
+  text-decoration: none !important;
+  font-size: 0 !important; /* Esconde o inglês */
+  display: block !important;
+  margin-top: 16px !important;
+}
+
+#html5-qrcode-anchor-scan-type-change::after {
+  content: "Alternar modo (Câmera / Arquivo)";
+  font-size: 0.875rem;
+  text-decoration: underline;
+}
+
+#reader__scan_region {
+  background: transparent;
+}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Html5QrcodeScanner } from 'html5-qrcode'
+import { Html5Qrcode } from 'html5-qrcode'
 import { useRealtimeQueue } from '@/hooks/useRealtimeQueue'
 import { createClient } from '@/lib/supabase/client'
 import { ValidationFeedback, FeedbackType } from '@/components/ValidationFeedback'
@@ -62,7 +62,10 @@ export default function AdminPage() {
   const [showCloseDayModal, setShowCloseDayModal] = useState(false)
   const [closeDayInput, setCloseDayInput] = useState('')
   const [closingDay, setClosingDay] = useState(false)
+  const [isCameraActive, setIsCameraActive] = useState(false)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
   const isScanning = useRef(false)
+  const userStoppedCameraRef = useRef(false)
   const { queueInfo, loading: queueLoading } = useRealtimeQueue()
   const supabase = createClient()
   const router = useRouter()
@@ -217,34 +220,7 @@ export default function AdminPage() {
     }
   }, [isAdmin, supabase, fetchWaitingTickets, fetchAdminStats])
 
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null)
-
-  useEffect(() => {
-    if (!isAdmin || !showScanner || activeTab !== 'scanner') return
-
-    // Evitar inicialização dupla no React StrictMode
-    if (!scannerRef.current) {
-      scannerRef.current = new Html5QrcodeScanner(
-        "reader",
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        /* verbose= */ false
-      )
-
-      scannerRef.current.render(handleScan, handleError)
-    }
-
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(error => {
-          console.error("Failed to clear scanner", error)
-        })
-        scannerRef.current = null
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, showScanner, activeTab])
-
-  async function handleScan(decodedText: string) {
+  const handleScan = useCallback(async (decodedText: string) => {
     if (isScanning.current) return
     isScanning.current = true
 
@@ -295,11 +271,73 @@ export default function AdminPage() {
     } catch {
       setFeedback({ type: 'error', title: 'Erro de Requisição', message: 'Houve um erro indesejado na conexão.' })
     }
+  }, [supabase, fetchWaitingTickets, fetchAdminStats])
+
+  const handleError = useCallback(() => {
+    // Ignorar erros comuns de leitura falha por frame
+  }, [])
+
+  const startCamera = useCallback(async () => {
+    if (!scannerRef.current) {
+      scannerRef.current = new Html5Qrcode("reader")
+    }
+    try {
+      await scannerRef.current.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        handleScan,
+        handleError
+      )
+      setIsCameraActive(true)
+    } catch (err) {
+      console.error(err)
+      setFeedback({ type: 'error', title: 'Câmera Bloqueada', message: 'Verifique as permissões de câmera do seu navegador.' })
+    }
+  }, [handleScan, handleError])
+
+  const stopCamera = useCallback(async () => {
+    if (scannerRef.current && isCameraActive) {
+      try {
+        await scannerRef.current.stop()
+        setIsCameraActive(false)
+      } catch (err) {
+        console.error("Failed to stop scanner", err)
+      }
+    }
+  }, [isCameraActive])
+
+  const handleManualStart = () => {
+    userStoppedCameraRef.current = false
+    startCamera()
   }
 
-  function handleError() {
-    // Ignorar erros comuns de leitura falha por frame
+  const handleManualStop = () => {
+    userStoppedCameraRef.current = true
+    stopCamera()
   }
+
+  // Ligar a câmera automaticamente se a aba for a do scanner e estiver mostrando o scanner
+  useEffect(() => {
+    if (isAdmin && showScanner && activeTab === 'scanner') {
+      if (!isCameraActive && !userStoppedCameraRef.current) {
+        startCamera()
+      }
+    } else {
+      if (isCameraActive) {
+        stopCamera()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, showScanner, activeTab])
+
+  // Cleanup geral ao desmontar
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        scannerRef.current.stop().catch(console.error)
+      }
+    }
+  }, [])
 
   const handleCloseFeedback = () => {
     setFeedback({ type: null, title: '', message: '' })
@@ -532,13 +570,36 @@ export default function AdminPage() {
               {showScanner ? <ChevronUp className="w-5 h-5" style={{ color: 'var(--gray-40)' }} /> : <ChevronDown className="w-5 h-5" style={{ color: 'var(--gray-40)' }} />}
             </button>
             {showScanner && (
-              <div className="p-4">
-                <div className="rounded overflow-hidden" style={{ background: '#000' }}>
-                  <p className="text-center text-white/60 text-sm py-3 flex items-center justify-center gap-2">
-                    <ScanLine className="w-4 h-4" /> Aponte a câmera para o QR Code do aluno
+              <div className="p-4 flex flex-col items-center">
+                <div className={`w-full ${!isCameraActive ? 'hidden' : ''}`}>
+                  <p className="text-center text-gray-600 text-sm mb-3 flex items-center justify-center gap-2">
+                    <ScanLine className="w-4 h-4 text-blue-600 animate-pulse" /> Aponte a câmera para o QR Code
                   </p>
-                  <div id="reader" className="w-full bg-black rounded overflow-hidden"></div>
+                  <div id="reader" className="w-full bg-black rounded overflow-hidden shadow-inner"></div>
+                  <button
+                    onClick={handleManualStop}
+                    className="btn-gov-secondary w-full mt-4"
+                    style={{ color: 'var(--gov-red)', borderColor: 'var(--gov-red)' }}
+                  >
+                    Desligar Câmera
+                  </button>
                 </div>
+
+                {!isCameraActive && (
+                  <div className="w-full py-12 flex flex-col items-center justify-center bg-gray-100 rounded border border-gray-200">
+                    <QrCode className="w-12 h-12 mb-3 text-gray-400" />
+                    <p className="text-sm font-medium text-gray-600 mb-4 text-center px-4">
+                      A câmera está desligada. Clique abaixo para ativar.
+                    </p>
+                    <button
+                      onClick={handleManualStart}
+                      className="btn-gov-primary"
+                    >
+                      <ScanLine className="w-4 h-4" />
+                      Ativar Câmera Traseira
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
