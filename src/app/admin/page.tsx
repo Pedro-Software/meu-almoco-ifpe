@@ -59,6 +59,9 @@ export default function AdminPage() {
   const [adminError, setAdminError] = useState('')
   const [adminSuccess, setAdminSuccess] = useState('')
   const [processingNoShows, setProcessingNoShows] = useState(false)
+  const [showCloseDayModal, setShowCloseDayModal] = useState(false)
+  const [closeDayInput, setCloseDayInput] = useState('')
+  const [closingDay, setClosingDay] = useState(false)
   const isScanning = useRef(false)
   const { queueInfo, loading: queueLoading } = useRealtimeQueue()
   const supabase = createClient()
@@ -349,6 +352,34 @@ export default function AdminPage() {
       setFeedback({ type: 'error', title: 'Erro', message: 'Falha na conexão' })
     } finally {
       setProcessingNoShows(false)
+    }
+  }
+
+  const handleCloseDay = async () => {
+    if (closeDayInput !== 'ENCERRAR DIA') {
+      setFeedback({ type: 'error', title: 'Erro', message: 'Digite a confirmação corretamente.' })
+      return
+    }
+    setClosingDay(true)
+    try {
+      const { data, error } = await supabase.rpc('close_day_reset')
+      if (error || data?.error) {
+        setFeedback({ type: 'error', title: 'Erro', message: data?.error || error?.message || 'Falha ao encerrar dia.' })
+      } else {
+        setFeedback({
+          type: 'success',
+          title: 'Dia Encerrado',
+          message: data.message || `${data.affected_count} reservas não utilizadas foram limpas. Fila reiniciada.`
+        })
+        setShowCloseDayModal(false)
+        setCloseDayInput('')
+        fetchWaitingTickets()
+        fetchAdminStats()
+      }
+    } catch {
+      setFeedback({ type: 'error', title: 'Erro', message: 'Falha na conexão' })
+    } finally {
+      setClosingDay(false)
     }
   }
 
@@ -645,6 +676,30 @@ export default function AdminPage() {
                 </button>
               </div>
             </div>
+
+            {isSuperAdmin && (
+              <div className="gov-card p-5 mt-4" style={{ borderLeft: '4px solid #866800' }}>
+                <div className="flex items-start gap-4">
+                  <div>
+                    <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--gray-90)' }}>
+                      <DoorOpen className="w-5 h-5" style={{ color: '#866800' }} /> Limpeza Operacional do Dia
+                    </h3>
+                  </div>
+                </div>
+                <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--gray-5)' }}>
+                  <p className="text-xs mb-3" style={{ color: 'var(--gray-40)' }}>
+                    Exclusivo para Super Admin. Esta ação cancela todas as reservas não utilizadas do dia atual e zera a numeração da fila para o dia seguinte. O histórico de atendimentos (relatório) é preservado integralmente.
+                  </p>
+                  <button
+                    onClick={() => setShowCloseDayModal(true)}
+                    className="btn-gov-primary w-full"
+                    style={{ background: '#866800', fontSize: '0.875rem' }}
+                  >
+                    Encerrar/Limpar Dia
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -771,6 +826,57 @@ export default function AdminPage() {
         )}
 
       </main>
+
+      {showCloseDayModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded w-full max-w-sm overflow-hidden shadow-2xl animate-fade-in relative">
+            <div className="p-4" style={{ background: 'var(--gov-red)' }}>
+              <h3 className="text-white font-bold flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5" />
+                Cuidado: Ação Crítica
+              </h3>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm font-medium text-gray-800">
+                Você está prestes a encerrar a operação de hoje.
+              </p>
+              <ul className="text-xs text-gray-600 list-disc pl-4 space-y-1">
+                <li>A fila e o painel público serão zerados.</li>
+                <li>Fichas não utilizadas hoje passarão a "canceladas".</li>
+                <li>Reservas confirmadas não serão perdidas.</li>
+                <li>O relatório e histórico geral permanecerá intacto.</li>
+              </ul>
+              <p className="text-xs font-bold mt-3" style={{ color: 'var(--gov-red)' }}>
+                Para confirmar, digite exatamente: <br/><span className="bg-red-50 px-2 py-0.5 rounded border mt-1 inline-block" style={{ borderColor: 'var(--gov-red-light)' }}>ENCERRAR DIA</span>
+              </p>
+              <input
+                type="text"
+                value={closeDayInput}
+                onChange={(e) => setCloseDayInput(e.target.value)}
+                placeholder="ENCERRAR DIA"
+                className="w-full border p-2 rounded text-sm text-center uppercase font-bold tracking-widest"
+                style={{ borderColor: 'var(--gov-red)', outlineColor: 'var(--gov-red)' }}
+              />
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => { setShowCloseDayModal(false); setCloseDayInput(''); }}
+                  className="flex-1 py-2 rounded text-sm font-bold bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleCloseDay}
+                  disabled={closeDayInput !== 'ENCERRAR DIA' || closingDay}
+                  className="flex-1 flex justify-center py-2 rounded text-sm font-bold text-white transition-colors disabled:opacity-50"
+                  style={{ background: 'var(--gov-red)' }}
+                >
+                  {closingDay ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirmar Limpeza'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer style={{ background: 'var(--gov-blue-dark)', borderTop: '3px solid var(--gov-yellow)' }} className="py-6 px-4 flex flex-col items-center mt-8">
         <p className="text-white/50 text-xs mb-3 font-medium tracking-wide">IFPE Belo Jardim · Painel Administrativo</p>

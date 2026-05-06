@@ -33,6 +33,8 @@ DECLARE
   v_total_reservations INTEGER;
   v_max_tickets INTEGER;
   v_next_queue_number INTEGER;
+  v_current_queue_number INTEGER := 0;
+  v_start_val INTEGER := 1;
 BEGIN
   v_user_id := auth.uid();
   IF v_user_id IS NULL THEN RETURN jsonb_build_object('error', 'Não autenticado'); END IF;
@@ -68,10 +70,9 @@ BEGIN
   END IF;
 
   -- LOCK ANTECIPADO: serializa TODA a lógica de cota + queue_number
-  -- Deve vir ANTES da contagem para evitar race condition na cota de 500
   PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
 
-  -- Verificar limite de 500 reservas por dia (agora sob lock)
+  -- Verificar limite de 500 reservas por dia
   SELECT max_tickets INTO v_max_tickets FROM public.queue_state WHERE id = 1;
   
   SELECT COUNT(*) INTO v_total_reservations
@@ -82,24 +83,39 @@ BEGIN
   SELECT * INTO v_existing FROM public.reservations
   WHERE user_id = v_user_id AND reservation_date = p_date;
 
+  -- Calcular o número mínimo aceitável para não enviar o aluno para o passado (atrás de quem já comeu)
+  IF p_date = CURRENT_DATE THEN
+    SELECT COALESCE(current_number, 0) INTO v_current_queue_number FROM public.queue_state WHERE id = 1;
+    v_start_val := v_current_queue_number + 1;
+  END IF;
+
   IF FOUND THEN
     IF v_existing.status = 'reserved' THEN
-      -- CANCELAR: preserva queue_number para histórico (evita reaproveitamento)
-      UPDATE public.reservations SET status = 'cancelled', qr_token = NULL
+      -- CANCELAR: Limpa o queue_number, devolvendo a numeração para a "piscina" de disponíveis
+      UPDATE public.reservations SET status = 'cancelled', qr_token = NULL, queue_number = NULL
       WHERE id = v_existing.id;
       RETURN jsonb_build_object('success', true, 'action', 'cancelled',
         'message', format('Reserva cancelada para %s', to_char(p_date, 'DD/MM')));
 
     ELSIF v_existing.status = 'cancelled' THEN
-      -- RE-RESERVAR: verifica cota e gera novo queue_number no final
+      -- RE-RESERVAR:
       IF v_total_reservations >= v_max_tickets THEN
         RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
       END IF;
 
-      -- MAX inclui queue_numbers de cancelados (preservados), garantindo unicidade
-      SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_next_queue_number
-      FROM public.reservations
-      WHERE reservation_date = p_date;
+      -- REGRA: Acha a menor ficha disponível (gap) a partir do v_start_val
+      SELECT COALESCE(MIN(t1.queue_number + 1), v_start_val) INTO v_next_queue_number
+      FROM (
+        SELECT queue_number FROM public.reservations
+        WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed') AND queue_number >= v_start_val - 1
+        UNION ALL
+        SELECT v_start_val - 1
+      ) t1
+      LEFT JOIN (
+        SELECT queue_number FROM public.reservations
+        WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed')
+      ) t2 ON t1.queue_number + 1 = t2.queue_number
+      WHERE t2.queue_number IS NULL;
 
       UPDATE public.reservations 
       SET status = 'reserved', created_at = now(), queue_number = v_next_queue_number
@@ -113,15 +129,24 @@ BEGIN
       RETURN jsonb_build_object('error', 'Esta reserva não pode ser alterada');
     END IF;
   ELSE
-    -- NOVA RESERVA: verifica cota e gera queue_number
+    -- NOVA RESERVA:
     IF v_total_reservations >= v_max_tickets THEN
       RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
     END IF;
 
-    -- MAX inclui queue_numbers de cancelados (preservados), garantindo unicidade
-    SELECT COALESCE(MAX(queue_number), 0) + 1 INTO v_next_queue_number
-    FROM public.reservations
-    WHERE reservation_date = p_date;
+    -- REGRA: Acha a menor ficha disponível (gap) a partir do v_start_val
+    SELECT COALESCE(MIN(t1.queue_number + 1), v_start_val) INTO v_next_queue_number
+    FROM (
+      SELECT queue_number FROM public.reservations
+      WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed') AND queue_number >= v_start_val - 1
+      UNION ALL
+      SELECT v_start_val - 1
+    ) t1
+    LEFT JOIN (
+      SELECT queue_number FROM public.reservations
+      WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed')
+    ) t2 ON t1.queue_number + 1 = t2.queue_number
+    WHERE t2.queue_number IS NULL;
 
     INSERT INTO public.reservations (user_id, reservation_date, status, queue_number)
     VALUES (v_user_id, p_date, 'reserved', v_next_queue_number);
@@ -610,5 +635,71 @@ BEGIN
     'avg_duration_minutes', v_avg_duration_minutes,
     'currently_inside', v_currently_inside,
     'skipped_count', v_skipped_count
+  );
+END; $$;
+
+-- ============================================
+-- 13. Tabela de Auditoria e Limpeza Operacional do Dia
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.admin_actions_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_id UUID NOT NULL REFERENCES auth.users(id),
+  action TEXT NOT NULL,
+  target_date DATE NOT NULL,
+  affected_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.admin_actions_log ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  CREATE POLICY "Super admins podem ver logs" ON public.admin_actions_log FOR SELECT
+    USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin' AND is_super_admin = true));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE OR REPLACE FUNCTION public.close_day_reset()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET timezone = 'America/Recife'
+AS $$
+DECLARE
+  v_is_super BOOLEAN;
+  v_count INTEGER;
+  v_log_id UUID;
+BEGIN
+  -- Verificar se é superadmin
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles 
+    WHERE id = auth.uid() AND role = 'admin' AND is_super_admin = true
+  ) INTO v_is_super;
+
+  IF NOT v_is_super THEN 
+    RETURN jsonb_build_object('error', 'Apenas super administradores podem encerrar o dia operacional.'); 
+  END IF;
+
+  -- Lock preventivo na tabela de fila
+  PERFORM 1 FROM public.queue_state WHERE id = 1 FOR UPDATE;
+
+  -- Mudar apenas 'reserved' para 'cancelled' na data de HOJE
+  -- (Reservas 'confirmed', 'no_show', e futuras continuam intactas)
+  UPDATE public.reservations 
+  SET status = 'cancelled', qr_token = NULL, queue_number = NULL
+  WHERE reservation_date = CURRENT_DATE AND status = 'reserved';
+
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+
+  -- Resetar estado visual da fila (painel de TV volta a aguardar chamadas)
+  UPDATE public.queue_state SET current_number = 0 WHERE id = 1;
+
+  -- Registrar a ação no histórico de auditoria
+  INSERT INTO public.admin_actions_log (admin_id, action, target_date, affected_count)
+  VALUES (auth.uid(), 'close_day', CURRENT_DATE, v_count)
+  RETURNING id INTO v_log_id;
+
+  RETURN jsonb_build_object(
+    'success', true, 
+    'message', format('Operação encerrada. %s reservas pendentes foram canceladas e a fila foi reiniciada.', v_count),
+    'affected_count', v_count
   );
 END; $$;
