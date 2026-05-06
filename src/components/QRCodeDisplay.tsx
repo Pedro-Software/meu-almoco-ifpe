@@ -54,6 +54,18 @@ export function QRCodeDisplay({ qrToken, queueNumber }: QRCodeDisplayProps) {
           </div>
         </div>
 
+        {/* Orientação especial para fichas 001-010 */}
+        {queueNumber >= 1 && queueNumber <= 10 && (
+          <div
+            className="w-full flex items-start gap-3 p-3.5 rounded-lg mb-5 text-sm animate-fade-in"
+            style={{ background: '#FFF8E1', border: '1.5px solid #FFD54F' }}
+          >
+            <p className="leading-snug" style={{ color: '#5D4037' }}>
+              <strong>Sua ficha está entre 001 e 010.</strong> Dirija-se à frente do refeitório às <strong>11:50</strong> para aguardar o início do atendimento.
+            </p>
+          </div>
+        )}
+
         {/* QR Code */}
         <div
           className="p-4 rounded mb-4"

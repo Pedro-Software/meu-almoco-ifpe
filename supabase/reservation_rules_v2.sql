@@ -108,8 +108,8 @@ BEGIN
         RETURN jsonb_build_object('error', 'É necessário informar uma justificativa para cancelar a reserva.');
       END IF;
 
-      -- Cancelar a reserva
-      UPDATE public.reservations SET status = 'cancelled', qr_token = NULL, queue_number = NULL
+      -- Cancelar a reserva (queue_number é preservado para que o número "morra" e não seja reutilizado)
+      UPDATE public.reservations SET status = 'cancelled', qr_token = NULL
       WHERE id = v_existing.id;
 
       -- Registrar no histórico de cancelamentos
@@ -126,19 +126,10 @@ BEGIN
         RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
       END IF;
 
-      -- REGRA: Acha a menor ficha disponível (gap) a partir do v_start_val
-      SELECT COALESCE(MIN(t1.queue_number + 1), v_start_val) INTO v_next_queue_number
-      FROM (
-        SELECT queue_number FROM public.reservations
-        WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed') AND queue_number >= v_start_val - 1
-        UNION ALL
-        SELECT v_start_val - 1
-      ) t1
-      LEFT JOIN (
-        SELECT queue_number FROM public.reservations
-        WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed')
-      ) t2 ON t1.queue_number + 1 = t2.queue_number
-      WHERE t2.queue_number IS NULL;
+      -- REGRA: Número sequencial (MAX+1). Números cancelados "morrem" e não são reutilizados.
+      SELECT GREATEST(COALESCE(MAX(queue_number), 0) + 1, v_start_val) INTO v_next_queue_number
+      FROM public.reservations
+      WHERE reservation_date = p_date;
 
       UPDATE public.reservations 
       SET status = 'reserved', created_at = now(), queue_number = v_next_queue_number
@@ -157,19 +148,10 @@ BEGIN
       RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
     END IF;
 
-    -- REGRA: Acha a menor ficha disponível (gap) a partir do v_start_val
-    SELECT COALESCE(MIN(t1.queue_number + 1), v_start_val) INTO v_next_queue_number
-    FROM (
-      SELECT queue_number FROM public.reservations
-      WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed') AND queue_number >= v_start_val - 1
-      UNION ALL
-      SELECT v_start_val - 1
-    ) t1
-    LEFT JOIN (
-      SELECT queue_number FROM public.reservations
-      WHERE reservation_date = p_date AND status IN ('reserved', 'confirmed')
-    ) t2 ON t1.queue_number + 1 = t2.queue_number
-    WHERE t2.queue_number IS NULL;
+    -- REGRA: Número sequencial (MAX+1). Números cancelados "morrem" e não são reutilizados.
+    SELECT GREATEST(COALESCE(MAX(queue_number), 0) + 1, v_start_val) INTO v_next_queue_number
+    FROM public.reservations
+    WHERE reservation_date = p_date;
 
     INSERT INTO public.reservations (user_id, reservation_date, status, queue_number)
     VALUES (v_user_id, p_date, 'reserved', v_next_queue_number);

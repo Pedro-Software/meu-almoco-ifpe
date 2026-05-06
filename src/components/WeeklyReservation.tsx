@@ -334,9 +334,16 @@ export function WeeklyReservation() {
                       </span>
                       <span className="text-xs mt-0.5" style={{ color: 'var(--gray-40)' }}>
                         {isReserved && reservation?.queue_number && (
-                          <span className="flex items-center gap-1" style={{ color: 'var(--gov-blue)', fontWeight: 600 }}>
-                            Fila #{reservation.queue_number.toString().padStart(3, '0')}
-                          </span>
+                          <>
+                            <span className="flex items-center gap-1" style={{ color: 'var(--gov-blue)', fontWeight: 600 }}>
+                              Fila #{reservation.queue_number.toString().padStart(3, '0')}
+                            </span>
+                            {reservation.queue_number >= 1 && reservation.queue_number <= 10 && (
+                              <span className="flex items-center gap-1 mt-0.5" style={{ color: '#BF360C', fontWeight: 500 }}>
+                                Chegue às 11:50 na frente do refeitório
+                              </span>
+                            )}
+                          </>
                         )}
                         {!editable && !isReserved && isNotYetOpen(date) && (
                           <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> Abre em {getOpeningDate(date)}</span>
