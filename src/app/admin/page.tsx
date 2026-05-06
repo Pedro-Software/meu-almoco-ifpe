@@ -281,6 +281,15 @@ export default function AdminPage() {
     if (!scannerRef.current) {
       scannerRef.current = new Html5Qrcode("reader")
     }
+    // EXTREMAMENTE IMPORTANTE: A div #reader precisa estar visível (sem display:none)
+    // na exata fração de segundo em que o start() é chamado, senão a biblioteca
+    // calcula a largura da tela como 0x0 e a câmera fica invisível.
+    setIsCameraActive(true)
+
+    // Aguarda o React renderizar a remoção da classe 'hidden' da div #reader
+    // para que a biblioteca encontre a largura real (clientWidth > 0)
+    await new Promise(resolve => setTimeout(resolve, 50))
+
     try {
       await scannerRef.current.start(
         { facingMode: "environment" },
@@ -288,9 +297,9 @@ export default function AdminPage() {
         handleScan,
         handleError
       )
-      setIsCameraActive(true)
     } catch (err) {
       console.error(err)
+      setIsCameraActive(false) // Se der erro, volta a esconder
       setFeedback({ type: 'error', title: 'Câmera Bloqueada', message: 'Verifique as permissões de câmera do seu navegador.' })
     }
   }, [handleScan, handleError])
