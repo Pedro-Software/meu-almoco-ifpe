@@ -148,12 +148,11 @@ export default function Dashboard() {
             className="flex items-start gap-4 p-4 rounded animate-fade-in-up"
             style={{ background: '#E8F0FE', border: '1px solid #c2d5f5' }}
           >
-            <div className="w-9 h-9 rounded flex items-center justify-center flex-shrink-0" style={{ background: 'var(--gov-blue)', opacity: 0.15 }}>
-              <BellRing size={18} style={{ color: 'var(--gov-blue)' }} />
+            <div className="w-10 h-10 rounded flex items-center justify-center flex-shrink-0" style={{ background: 'var(--gov-blue)' }}>
+              <BellRing size={20} className="text-white" />
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
-                <BellRing size={16} style={{ color: 'var(--gov-blue)' }} />
                 <h3 className="font-bold text-sm" style={{ color: 'var(--gov-blue-dark)' }}>Ativar Notificações</h3>
               </div>
               <p className="text-xs mb-3" style={{ color: 'var(--gov-blue)' }}>
