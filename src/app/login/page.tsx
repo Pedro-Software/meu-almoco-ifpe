@@ -58,9 +58,12 @@ export default function Login() {
     })
 
     if (error) {
-      setError(error.message === 'Invalid login credentials' 
-        ? 'E-mail ou senha incorretos.' 
-        : error.message)
+      const msg = error.message === 'Invalid login credentials'
+        ? 'E-mail ou senha incorretos.'
+        : error.message === 'Email not confirmed'
+        ? 'E-mail ainda não confirmado. Entre no Gmail e verifique na sua caixa de spam o e-mail do Meu Almoço IFPE.'
+        : error.message
+      setError(msg)
       setLoading(false)
     } else {
       router.push('/dashboard')
