@@ -564,6 +564,7 @@ export default function AdminPage() {
 
         {/* Tab Content */}
         {activeTab === 'scanner' && (
+          <>
           <div className="gov-card overflow-hidden">
             <button
               onClick={() => setShowScanner(!showScanner)}
@@ -612,6 +613,57 @@ export default function AdminPage() {
               </div>
             )}
           </div>
+
+          {/* Atalho: Pular aluno atual — visível na aba do scanner */}
+          <div className="gov-card overflow-hidden mt-4" style={{ borderLeft: '4px solid var(--gov-orange)' }}>
+            <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--gray-5)' }}>
+              <h3 className="font-bold flex items-center gap-2 text-sm" style={{ color: 'var(--gray-90)' }}>
+                <div className="w-7 h-7 rounded flex items-center justify-center" style={{ background: 'var(--gov-orange)' }}>
+                  <SkipForward className="w-4 h-4 text-white" />
+                </div>
+                Próximo na Fila
+              </h3>
+            </div>
+            {waitingTickets.length > 0 ? (
+              <div className="px-5 py-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span
+                    className="text-2xl font-black tabular-nums flex-shrink-0"
+                    style={{ color: 'var(--gov-orange)', fontFamily: 'var(--font-primary)' }}
+                  >
+                    #{waitingTickets[0].queue_number.toString().padStart(3, '0')}
+                  </span>
+                  <div className="min-w-0">
+                    <span className="font-semibold block text-sm truncate" style={{ color: 'var(--gray-90)' }}>
+                      {waitingTickets[0].student_name}
+                    </span>
+                    <span className="text-xs" style={{ color: 'var(--gray-40)' }}>
+                      Aguardando chamada
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleSkipAndRequeue(waitingTickets[0].id, waitingTickets[0].student_name)}
+                  disabled={loadingAction === waitingTickets[0].id}
+                  className="btn-gov-primary flex-shrink-0 text-sm px-4 py-2.5"
+                  style={{ background: 'var(--gov-orange)', fontSize: '0.8125rem' }}
+                >
+                  {loadingAction === waitingTickets[0].id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <SkipForward className="w-4 h-4" />
+                  )}
+                  Pular Aluno
+                </button>
+              </div>
+            ) : (
+              <div className="px-5 py-6 text-center" style={{ color: 'var(--gray-20)' }}>
+                <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm font-medium">Nenhum aluno na fila</p>
+              </div>
+            )}
+          </div>
+          </>
         )}
 
         {activeTab === 'queue' && (

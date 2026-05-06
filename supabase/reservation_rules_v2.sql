@@ -20,7 +20,7 @@ UPDATE public.queue_state SET max_tickets = 500 WHERE id = 1;
 -- ============================================
 -- 2. toggle_reservation — Função principal de reserva/cancelamento
 -- ============================================
-CREATE OR REPLACE FUNCTION public.toggle_reservation(p_date DATE)
+CREATE OR REPLACE FUNCTION public.toggle_reservation(p_date DATE, p_justification TEXT DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -35,6 +35,7 @@ DECLARE
   v_next_queue_number INTEGER;
   v_current_queue_number INTEGER := 0;
   v_start_val INTEGER := 1;
+  v_cancel_count INTEGER;
 BEGIN
   v_user_id := auth.uid();
   IF v_user_id IS NULL THEN RETURN jsonb_build_object('error', 'Não autenticado'); END IF;
@@ -91,14 +92,36 @@ BEGIN
 
   IF FOUND THEN
     IF v_existing.status = 'reserved' THEN
-      -- CANCELAR: Limpa o queue_number, devolvendo a numeração para a "piscina" de disponíveis
+      -- === CANCELAMENTO ===
+
+      -- Verificar limite de 2 cancelamentos por aluno por data
+      SELECT COUNT(*) INTO v_cancel_count
+      FROM public.cancellation_log
+      WHERE user_id = v_user_id AND reservation_date = p_date;
+
+      IF v_cancel_count >= 2 THEN
+        RETURN jsonb_build_object('error', 'Você já atingiu o limite de 2 cancelamentos para esta data. Não é possível cancelar novamente.');
+      END IF;
+
+      -- Justificativa obrigatória
+      IF p_justification IS NULL OR TRIM(p_justification) = '' THEN
+        RETURN jsonb_build_object('error', 'É necessário informar uma justificativa para cancelar a reserva.');
+      END IF;
+
+      -- Cancelar a reserva
       UPDATE public.reservations SET status = 'cancelled', qr_token = NULL, queue_number = NULL
       WHERE id = v_existing.id;
+
+      -- Registrar no histórico de cancelamentos
+      INSERT INTO public.cancellation_log (user_id, reservation_date, justification)
+      VALUES (v_user_id, p_date, TRIM(p_justification));
+
       RETURN jsonb_build_object('success', true, 'action', 'cancelled',
-        'message', format('Reserva cancelada para %s', to_char(p_date, 'DD/MM')));
+        'message', format('Reserva cancelada para %s', to_char(p_date, 'DD/MM')),
+        'cancellations_used', v_cancel_count + 1);
 
     ELSIF v_existing.status = 'cancelled' THEN
-      -- RE-RESERVAR:
+      -- RE-RESERVAR (justificativa NÃO é necessária para re-reservar)
       IF v_total_reservations >= v_max_tickets THEN
         RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
       END IF;
@@ -129,7 +152,7 @@ BEGIN
       RETURN jsonb_build_object('error', 'Esta reserva não pode ser alterada');
     END IF;
   ELSE
-    -- NOVA RESERVA:
+    -- NOVA RESERVA (justificativa NÃO é necessária)
     IF v_total_reservations >= v_max_tickets THEN
       RETURN jsonb_build_object('error', format('Cota diária atingida (%s reservas)', v_max_tickets));
     END IF;
@@ -220,6 +243,7 @@ DECLARE
   v_user_id UUID;
   v_reservations jsonb;
   v_blocked_until DATE;
+  v_cancellation_counts jsonb;
 BEGIN
   v_user_id := auth.uid();
   IF v_user_id IS NULL THEN RETURN jsonb_build_object('error', 'Não autenticado'); END IF;
@@ -238,7 +262,25 @@ BEGIN
     AND r.reservation_date < p_week_start + INTERVAL '7 days'
     AND r.status IN ('reserved', 'confirmed');
 
-  RETURN jsonb_build_object('success', true, 'reservations', v_reservations, 'blocked_until', v_blocked_until);
+  -- Contagem de cancelamentos por data na semana
+  SELECT COALESCE(jsonb_object_agg(
+    cl.reservation_date::text, cl.cnt
+  ), '{}'::jsonb) INTO v_cancellation_counts
+  FROM (
+    SELECT reservation_date, COUNT(*) AS cnt
+    FROM public.cancellation_log
+    WHERE user_id = v_user_id
+      AND reservation_date >= p_week_start
+      AND reservation_date < p_week_start + INTERVAL '7 days'
+    GROUP BY reservation_date
+  ) cl;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'reservations', v_reservations,
+    'blocked_until', v_blocked_until,
+    'cancellation_counts', v_cancellation_counts
+  );
 END; $$;
 
 -- ============================================

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { ChevronLeft, ChevronRight, Calendar, Lock, Loader2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar, Lock, Loader2, X, AlertTriangle } from 'lucide-react'
 
 interface Reservation {
   id: string
@@ -25,6 +25,12 @@ export function WeeklyReservation() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [blockedUntil, setBlockedUntil] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [cancellationCounts, setCancellationCounts] = useState<Record<string, number>>({})
+
+  // Modal de cancelamento
+  const [cancelModal, setCancelModal] = useState<{ open: boolean; date: Date | null }>({ open: false, date: null })
+  const [justification, setJustification] = useState('')
+  const [justificationError, setJustificationError] = useState('')
 
   // Client estável: useMemo garante que a referência não muda entre re-renders
   const supabase = useMemo(() => createClient(), [])
@@ -56,6 +62,7 @@ export function WeeklyReservation() {
     } else if (data?.success) {
       setReservations(data.reservations || [])
       setBlockedUntil(data.blocked_until)
+      setCancellationCounts(data.cancellation_counts || {})
     }
     setLoading(false)
   }, [supabase])
@@ -83,6 +90,53 @@ export function WeeklyReservation() {
     if (prevMonday >= currentMonday) setCurrentDate(prev)
   }
 
+  // Abre o modal de cancelamento ao invés de cancelar direto
+  const handleCancelClick = (date: Date) => {
+    setJustification('')
+    setJustificationError('')
+    setCancelModal({ open: true, date })
+  }
+
+  // Executa o cancelamento com justificativa
+  const confirmCancellation = async () => {
+    if (!cancelModal.date) return
+
+    const trimmed = justification.trim()
+    if (!trimmed) {
+      setJustificationError('Preencha a justificativa para cancelar.')
+      return
+    }
+    if (trimmed.length < 5) {
+      setJustificationError('A justificativa deve ter pelo menos 5 caracteres.')
+      return
+    }
+
+    const date = cancelModal.date
+    const tzOffset = date.getTimezoneOffset() * 60000
+    const dateStr = (new Date(date.getTime() - tzOffset)).toISOString().split('T')[0]
+    setActionLoading(dateStr)
+    setError(null)
+
+    const { data, error: rpcError } = await supabase.rpc('toggle_reservation', {
+      p_date: dateStr,
+      p_justification: trimmed
+    })
+
+    if (rpcError) {
+      setError(rpcError.message)
+    } else if (data?.error) {
+      setError(data.error)
+    } else {
+      const monday = calculateWeekDays(currentDate)
+      fetchReservations(monday)
+    }
+
+    setActionLoading(null)
+    setCancelModal({ open: false, date: null })
+    setJustification('')
+  }
+
+  // Reservar (sem justificativa)
   const toggleReservation = async (date: Date) => {
     if (blockedUntil && new Date(blockedUntil) > new Date()) return
     const tzOffset = date.getTimezoneOffset() * 60000
@@ -168,6 +222,15 @@ export function WeeklyReservation() {
     return viewMonday <= currentMonday
   }
 
+  // Retorna quantos cancelamentos o aluno já usou para a data
+  const getCancelCount = (date: Date) => {
+    const tzOffset = date.getTimezoneOffset() * 60000
+    const dateStr = (new Date(date.getTime() - tzOffset)).toISOString().split('T')[0]
+    return cancellationCounts[dateStr] || 0
+  }
+
+  const isCancelLimitReached = (date: Date) => getCancelCount(date) >= 2
+
   const reservedCount = reservations.filter(r => r.status === 'reserved' || r.status === 'confirmed').length
 
   return (
@@ -237,6 +300,10 @@ export function WeeklyReservation() {
               const editable = canModify(date)
               const isActionLoading = actionLoading === dateStr
               const today = isToday(date)
+              const cancelCount = getCancelCount(date)
+              const cancelLimitReached = isCancelLimitReached(date)
+              // O botão de cancelar é desabilitado se atingiu o limite
+              const cancelDisabled = isReserved && cancelLimitReached
 
               return (
                 <div
@@ -280,16 +347,34 @@ export function WeeklyReservation() {
                         {editable && !isReserved && 'Clique para reservar'}
                         {!editable && isReserved && !reservation?.queue_number && 'Não é possível cancelar agora'}
                       </span>
+                      {/* Indicador de cancelamentos usados */}
+                      {editable && isReserved && cancelCount > 0 && (
+                        <span className="text-[10px] font-semibold mt-0.5 flex items-center gap-1" style={{ color: cancelLimitReached ? 'var(--gov-red)' : 'var(--gov-orange)' }}>
+                          <AlertTriangle className="w-3 h-3" />
+                          {cancelLimitReached
+                            ? 'Limite de cancelamentos atingido'
+                            : `${cancelCount}/2 cancelamento${cancelCount > 1 ? 's' : ''} usado${cancelCount > 1 ? 's' : ''}`
+                          }
+                        </span>
+                      )}
                     </div>
                   </div>
 
                   {/* Botão ação */}
                   <button
-                    onClick={() => toggleReservation(date)}
-                    disabled={!editable || !!isActionLoading || !!(blockedUntil && new Date(blockedUntil) > new Date())}
+                    onClick={() => {
+                      if (isReserved) {
+                        handleCancelClick(date)
+                      } else {
+                        toggleReservation(date)
+                      }
+                    }}
+                    disabled={!editable || !!isActionLoading || !!(blockedUntil && new Date(blockedUntil) > new Date()) || cancelDisabled}
                     className="btn-gov-primary text-xs px-4 py-2 flex-shrink-0"
                     style={
-                      isReserved
+                      cancelDisabled
+                        ? { background: 'var(--gray-5)', color: 'var(--gray-40)', cursor: 'not-allowed', border: 'none' }
+                        : isReserved
                         ? { background: 'transparent', color: 'var(--gov-red)', border: '1.5px solid var(--gov-red)' }
                         : !editable
                         ? { background: 'var(--gray-5)', color: 'var(--gray-40)', cursor: 'not-allowed', border: 'none' }
@@ -298,6 +383,8 @@ export function WeeklyReservation() {
                   >
                     {isActionLoading ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : cancelDisabled ? (
+                      'Bloqueado'
                     ) : isReserved ? (
                       'Cancelar'
                     ) : editable ? (
@@ -317,9 +404,113 @@ export function WeeklyReservation() {
       <div className="px-4 py-3 flex items-start gap-3" style={{ background: '#E8F0FE', borderTop: '1px solid #c2d5f5' }}>
         <Calendar className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: 'var(--gov-blue)' }} />
         <p className="text-xs leading-relaxed" style={{ color: 'var(--gov-blue)' }}>
-          <strong>Regra:</strong> A reserva abre <strong>2 dias antes</strong> e permanece disponível até <strong>11:30 do próprio dia</strong>. Quem reserva primeiro tem prioridade na fila.
+          <strong>Regra:</strong> A reserva abre <strong>2 dias antes</strong> e permanece disponível até <strong>11:30 do próprio dia</strong>. Você pode cancelar no máximo <strong>2 vezes por dia</strong>. Quem reserva primeiro tem prioridade na fila.
         </p>
       </div>
+
+      {/* Modal de cancelamento com justificativa */}
+      {cancelModal.open && cancelModal.date && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setCancelModal({ open: false, date: null }) }}
+        >
+          <div
+            className="w-full max-w-md rounded-lg shadow-2xl overflow-hidden animate-fade-in"
+            style={{ background: '#fff' }}
+          >
+            {/* Header do modal */}
+            <div className="flex items-center justify-between px-5 py-4" style={{ background: 'var(--gov-red-light)', borderBottom: '2px solid var(--gov-red)' }}>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: 'var(--gov-red)' }}>
+                  <AlertTriangle className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm" style={{ color: 'var(--gov-red)' }}>Cancelar Reserva</h3>
+                  <p className="text-xs" style={{ color: 'var(--gov-red)', opacity: 0.7 }}>
+                    {cancelModal.date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCancelModal({ open: false, date: null })}
+                className="p-1.5 rounded hover:bg-white/50 transition-colors"
+              >
+                <X className="w-5 h-5" style={{ color: 'var(--gov-red)' }} />
+              </button>
+            </div>
+
+            {/* Corpo do modal */}
+            <div className="px-5 py-4 space-y-4">
+              {/* Contador de cancelamentos */}
+              {cancelModal.date && (
+                <div className="flex items-center gap-3 p-3 rounded" style={{ background: 'var(--gray-2)', border: '1px solid var(--gray-5)' }}>
+                  <div className="flex gap-1">
+                    {[0, 1].map(i => (
+                      <div
+                        key={i}
+                        className="w-3 h-3 rounded-full"
+                        style={{
+                          background: i < getCancelCount(cancelModal.date!) ? 'var(--gov-red)' : 'var(--gray-10)',
+                          border: `1px solid ${i < getCancelCount(cancelModal.date!) ? 'var(--gov-red)' : 'var(--gray-20)'}`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-xs font-medium" style={{ color: 'var(--gray-60)' }}>
+                    {getCancelCount(cancelModal.date)}/2 cancelamentos utilizados para este dia
+                  </span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-bold mb-2" style={{ color: 'var(--gray-90)' }}>
+                  Por que deseja cancelar? <span style={{ color: 'var(--gov-red)' }}>*</span>
+                </label>
+                <textarea
+                  value={justification}
+                  onChange={(e) => { setJustification(e.target.value); setJustificationError('') }}
+                  placeholder="Descreva o motivo do cancelamento..."
+                  rows={3}
+                  maxLength={500}
+                  className="gov-input"
+                  style={{ resize: 'vertical', minHeight: '80px', fontSize: '0.875rem' }}
+                />
+                <div className="flex justify-between items-center mt-1">
+                  {justificationError ? (
+                    <span className="text-xs font-medium" style={{ color: 'var(--gov-red)' }}>{justificationError}</span>
+                  ) : (
+                    <span className="text-xs" style={{ color: 'var(--gray-40)' }}>Mínimo de 5 caracteres</span>
+                  )}
+                  <span className="text-xs tabular-nums" style={{ color: 'var(--gray-40)' }}>{justification.length}/500</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Ações do modal */}
+            <div className="flex gap-3 px-5 py-4" style={{ borderTop: '1px solid var(--gray-5)', background: 'var(--gray-2)' }}>
+              <button
+                onClick={() => setCancelModal({ open: false, date: null })}
+                className="btn-gov-secondary flex-1 text-sm"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={confirmCancellation}
+                disabled={!!actionLoading}
+                className="btn-gov-primary flex-1 text-sm"
+                style={{ background: 'var(--gov-red)' }}
+              >
+                {actionLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Confirmar Cancelamento'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
